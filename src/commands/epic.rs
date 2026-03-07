@@ -78,7 +78,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
     })?;
     
     // Get tasks for this epic
-    let tasks = db.list_tasks(Some(id), None, None, None, false, false)?;
+    let tasks = db.list_tasks(Some(id), None, None, None, false, false, None)?;
     
     if quiet {
         println!("{}", epic.id);
@@ -157,7 +157,7 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
     })?;
     
     // Check for tasks
-    let tasks = db.list_tasks(Some(id), None, None, None, false, false)?;
+    let tasks = db.list_tasks(Some(id), None, None, None, false, false, None)?;
     
     if !force && !tasks.is_empty() {
         println!("{} Epic '{}' has {} task(s).", WARNING_PREFIX.yellow(), epic.title, tasks.len());

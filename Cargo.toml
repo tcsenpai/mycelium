@@ -27,6 +27,7 @@ colored = "2.1"
 comfy-table = "7.1"
 regex = "1.11"
 url = "2.5"
+toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3.14"

@@ -175,14 +175,15 @@ impl Database {
         priority: Priority,
         assignee_id: Option<i64>,
         due_date: Option<chrono::NaiveDate>,
+        tags: Option<&str>,
     ) -> Result<Task> {
         let now = chrono::Local::now().to_rfc3339();
         let due_date_str = due_date.map(|d| d.to_string());
         
         self.conn.execute(
-            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, created_at, updated_at) 
-             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?6, ?7, ?7)",
-            (title, description, priority.to_string(), epic_id, assignee_id, due_date_str, now),
+            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at) 
+             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            (title, description, priority.to_string(), epic_id, assignee_id, due_date_str, tags, now),
         )?;
         
         let id = self.conn.last_insert_rowid();
@@ -195,7 +196,7 @@ impl Database {
 
     pub fn get_task(&self, id: i64) -> Result<Option<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, created_at, updated_at 
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at 
              FROM tasks WHERE id = ?1"
         )?;
         
@@ -210,9 +211,10 @@ impl Database {
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
                 due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                tags: row.get(8)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
                     .unwrap().with_timezone(&chrono::Local),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?)
                     .unwrap().with_timezone(&chrono::Local),
             })
         });
@@ -232,6 +234,7 @@ impl Database {
         assignee_id: Option<i64>,
         blocked_only: bool,
         overdue_only: bool,
+        tag: Option<&str>,
     ) -> Result<Vec<Task>> {
         let mut conditions = vec!["1=1"];
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
@@ -257,9 +260,13 @@ impl Database {
             conditions.push("due_date < ? AND status = 'open'");
             params.push(Box::new(today));
         }
+        if let Some(t) = tag {
+            conditions.push("tags LIKE ?");
+            params.push(Box::new(format!("%{}%", t)));
+        }
 
         let sql = format!(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, created_at, updated_at 
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at 
              FROM tasks 
              WHERE {}
              ORDER BY 
@@ -287,9 +294,10 @@ impl Database {
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
                 due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                tags: row.get(8)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
                     .unwrap().with_timezone(&chrono::Local),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?)
                     .unwrap().with_timezone(&chrono::Local),
             })
         })?;
@@ -315,6 +323,7 @@ impl Database {
         epic_id: Option<Option<i64>>,
         assignee_id: Option<Option<i64>>,
         due_date: Option<Option<chrono::NaiveDate>>,
+        tags: Option<Option<&str>>,
     ) -> Result<Task> {
         let now = chrono::Local::now().to_rfc3339();
         
@@ -339,6 +348,9 @@ impl Database {
         if let Some(due_date) = due_date {
             let due_str = due_date.map(|d| d.to_string());
             self.conn.execute("UPDATE tasks SET due_date = ?1, updated_at = ?2 WHERE id = ?3", (due_str, &now, id))?;
+        }
+        if let Some(tags) = tags {
+            self.conn.execute("UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3", (tags, &now, id))?;
         }
         
         self.get_task(id)

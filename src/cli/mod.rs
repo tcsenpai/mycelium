@@ -129,6 +129,14 @@ pub enum TaskCommands {
         /// Due date (YYYY-MM-DD)
         #[arg(short, long)]
         due: Option<String>,
+        
+        /// Tags (comma-separated, e.g., "frontend,urgent")
+        #[arg(short, long)]
+        tags: Option<String>,
+        
+        /// Use a template
+        #[arg(short, long)]
+        template: Option<String>,
     },
     
     /// List tasks
@@ -156,6 +164,17 @@ pub enum TaskCommands {
         /// Show only overdue tasks
         #[arg(long)]
         overdue: bool,
+        
+        /// Filter by tag
+        #[arg(short, long)]
+        tag: Option<String>,
+    },
+    
+    /// Batch create tasks from JSON file
+    Batch {
+        /// JSON file path
+        #[arg(short, long)]
+        file: String,
     },
     
     /// Show task details
@@ -196,6 +215,10 @@ pub enum TaskCommands {
         /// New due date (YYYY-MM-DD)
         #[arg(short, long)]
         due: Option<String>,
+        
+        /// New tags (comma-separated, use - to remove)
+        #[arg(short, long)]
+        tags: Option<String>,
     },
     
     /// Delete a task
@@ -367,6 +390,10 @@ pub struct ListArgs {
     /// Show only overdue tasks
     #[arg(long)]
     pub overdue: bool,
+    
+    /// Filter by tag
+    #[arg(short, long)]
+    pub tag: Option<String>,
 }
 
 #[derive(Subcommand)]

@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Local, Duration};
 use colored::Colorize;
 use comfy_table::{Table, ContentArrangement};
 use crate::commands::{ensure_initialized, SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX, WARNING_PREFIX};
@@ -6,6 +6,7 @@ use crate::cli::OutputFormat;
 use crate::models::{Priority, Status};
 use crate::models::external_ref::parse_github_ref;
 use crate::error::Result;
+use std::fs;
 
 pub fn create(
     title: &str,
@@ -14,17 +15,30 @@ pub fn create(
     priority: &str,
     assignee_id: Option<i64>,
     due: Option<&str>,
+    tags: Option<&str>,
+    template: Option<&str>,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
     let mut db = ensure_initialized()?;
     
-    let priority_enum: Priority = priority.parse()?;
-    let due_date = due.map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d"))
-        .transpose()
-        .map_err(|_| crate::error::MyceliumError::InvalidDate(due.unwrap().to_string()))?;
+    // Apply template if specified
+    let (final_priority, final_tags) = if let Some(template_name) = template {
+        apply_template(template_name, priority, tags)?
+    } else {
+        (priority.to_string(), tags.map(|t| t.to_string()))
+    };
     
-    let task = db.create_task(title, description, epic_id, priority_enum, assignee_id, due_date)?;
+    // Parse relative dates
+    let due_date = if let Some(d) = due {
+        Some(parse_relative_date(d)?)
+    } else {
+        None
+    };
+    
+    let priority_enum: Priority = final_priority.parse()?;
+    
+    let task = db.create_task(title, description, epic_id, priority_enum, assignee_id, due_date, final_tags.as_deref())?;
     
     if quiet {
         println!("{}", task.id);
@@ -47,6 +61,7 @@ pub fn list(
     assignee_id: Option<i64>,
     blocked: bool,
     overdue: bool,
+    tag: Option<&str>,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
@@ -55,7 +70,7 @@ pub fn list(
     let status_enum: Option<Status> = status.map(|s| s.parse()).transpose()?;
     let priority_enum: Option<Priority> = priority.map(|p| p.parse()).transpose()?;
     
-    let tasks = db.list_tasks(epic_id, status_enum, priority_enum, assignee_id, blocked, overdue)?;
+    let tasks = db.list_tasks(epic_id, status_enum, priority_enum, assignee_id, blocked, overdue, tag)?;
     
     if quiet {
         for task in &tasks {
@@ -74,7 +89,7 @@ pub fn list(
             
             let mut table = Table::new();
             table.set_content_arrangement(ContentArrangement::Dynamic);
-            table.set_header(vec!["ID", "Title", "Status", "Priority", "Epic", "Due"]);
+            table.set_header(vec!["ID", "Title", "Status", "Priority", "Epic", "Due", "Tags"]);
             
             let task_count = tasks.len();
             for task in tasks {
@@ -85,6 +100,7 @@ pub fn list(
                 } else {
                     due
                 };
+                let tags = task.tags.unwrap_or_else(|| "-".to_string());
                 
                 table.add_row(vec![
                     task.id.to_string(),
@@ -93,6 +109,7 @@ pub fn list(
                     format!("{} {}", task.priority.emoji(), task.priority),
                     epic.unwrap_or_else(|| "-".to_string()),
                     due_str,
+                    tags,
                 ]);
             }
             
@@ -154,6 +171,9 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
                     println!("  Due: {}", due);
                 }
             }
+            if let Some(tags) = &task.tags {
+                println!("  Tags: {}", tags.yellow());
+            }
             println!("  Created: {}", task.created_at.format("%Y-%m-%d %H:%M"));
             println!();
             
@@ -183,6 +203,7 @@ pub fn update(
     epic_id: Option<i64>,
     assignee_id: Option<i64>,
     due: Option<&str>,
+    tags: Option<&str>,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
@@ -190,19 +211,17 @@ pub fn update(
     
     let status_enum = status.map(|s| s.parse::<Status>()).transpose()?;
     let priority_enum = priority.map(|p| p.parse::<Priority>()).transpose()?;
-    let due_date: Option<Option<NaiveDate>> = match due {
-        Some(d) => {
-            let date = NaiveDate::parse_from_str(d, "%Y-%m-%d")
-                .map_err(|_| crate::error::MyceliumError::InvalidDate(d.to_string()))?;
-            Some(Some(date))
-        }
-        None => None,
+    let due_date = if let Some(d) = due {
+        Some(Some(parse_relative_date(d)?))
+    } else {
+        None
     };
     
     let epic_opt = epic_id.map(|e| if e == 0 { None } else { Some(e) });
     let assignee_opt = assignee_id.map(|a| if a == 0 { None } else { Some(a) });
+    let tags_opt = tags.map(|t| if t == "-" { None } else { Some(t) });
     
-    let task = db.update_task(id, title, description, status_enum, priority_enum, epic_opt, assignee_opt, due_date)?;
+    let task = db.update_task(id, title, description, status_enum, priority_enum, epic_opt, assignee_opt, due_date, tags_opt)?;
     
     if quiet {
         println!("{}", task.id);
@@ -245,7 +264,7 @@ pub fn assign(task_id: i64, assignee_id: i64, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
     
     let assignee_opt = if assignee_id == 0 { None } else { Some(assignee_id) };
-    let _task = db.update_task(task_id, None, None, None, None, None, Some(assignee_opt), None)?;
+    let _task = db.update_task(task_id, None, None, None, None, None, Some(assignee_opt), None, None)?;
     
     if !quiet {
         if assignee_id == 0 {
@@ -338,7 +357,7 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
         return Ok(());
     }
     
-    let updated = db.update_task(id, None, None, Some(Status::Closed), None, None, None, None)?;
+    let updated = db.update_task(id, None, None, Some(Status::Closed), None, None, None, None, None)?;
     
     if !quiet {
         println!("{} Closed task #{}: {}", SUCCESS_PREFIX.green(), id, updated.title);
@@ -349,10 +368,193 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
 pub fn reopen(id: i64, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
     
-    let updated = db.update_task(id, None, None, Some(Status::Open), None, None, None, None)?;
+    let updated = db.update_task(id, None, None, Some(Status::Open), None, None, None, None, None)?;
     
     if !quiet {
         println!("{} Reopened task #{}: {}", SUCCESS_PREFIX.green(), id, updated.title);
     }
     Ok(())
+}
+
+/// Batch create tasks from a JSON file
+pub fn batch(file_path: &str, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let content = fs::read_to_string(file_path)?;
+    let tasks: Vec<BatchTaskInput> = serde_json::from_str(&content)?;
+    
+    let mut db = ensure_initialized()?;
+    let mut created_ids = Vec::new();
+    
+    for task_input in tasks {
+        let priority_enum: Priority = task_input.priority.parse()?;
+        
+        // Parse relative date if provided
+        let due_date = if let Some(d) = &task_input.due {
+            Some(parse_relative_date(d)?)
+        } else {
+            None
+        };
+        
+        let task = db.create_task(
+            &task_input.title,
+            task_input.description.as_deref(),
+            task_input.epic_id,
+            priority_enum,
+            task_input.assignee_id,
+            due_date,
+            task_input.tags.as_deref(),
+        )?;
+        
+        created_ids.push(task.id);
+        
+        // Handle dependencies if specified
+        if let Some(blocked_by) = task_input.blocked_by {
+            for blocker_id in blocked_by {
+                db.add_dependency(task.id, blocker_id)?;
+            }
+        }
+        
+        // Handle external refs if specified
+        if let Some(refs) = task_input.external_refs {
+            for ext_ref in refs {
+                match ext_ref.ref_type.as_str() {
+                    "github-issue" => {
+                        let (owner, repo, number) = parse_github_ref(&ext_ref.reference)
+                            .ok_or_else(|| crate::error::MyceliumError::InvalidGitHubRef(ext_ref.reference.clone()))?;
+                        db.add_external_ref(task.id, crate::models::ExternalRefType::GitHubIssue, 
+                            &format!("{}/{}/{}", owner, repo, number))?;
+                    }
+                    "github-pr" => {
+                        let (owner, repo, number) = parse_github_ref(&ext_ref.reference)
+                            .ok_or_else(|| crate::error::MyceliumError::InvalidGitHubRef(ext_ref.reference.clone()))?;
+                        db.add_external_ref(task.id, crate::models::ExternalRefType::GitHubPr, 
+                            &format!("{}/{}/{}", owner, repo, number))?;
+                    }
+                    "url" => {
+                        db.add_external_ref(task.id, crate::models::ExternalRefType::Url, &ext_ref.reference)?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    
+    if !quiet {
+        match format {
+            OutputFormat::Json => {
+                let result = serde_json::json!({
+                    "created": created_ids.len(),
+                    "task_ids": created_ids,
+                });
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            OutputFormat::Table => {
+                println!("{} Created {} task(s)", SUCCESS_PREFIX.green(), created_ids.len());
+                for id in &created_ids {
+                    println!("  - Task #{}", id);
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct BatchTaskInput {
+    title: String,
+    description: Option<String>,
+    epic_id: Option<i64>,
+    priority: String,
+    assignee_id: Option<i64>,
+    due: Option<String>,
+    tags: Option<String>,
+    blocked_by: Option<Vec<i64>>,
+    external_refs: Option<Vec<BatchExternalRef>>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct BatchExternalRef {
+    ref_type: String,
+    reference: String,
+}
+
+/// Parse relative dates like "tomorrow", "in 3 days", "next week"
+fn parse_relative_date(input: &str) -> Result<NaiveDate> {
+    let input = input.to_lowercase();
+    let today = Local::now().naive_local().date();
+    
+    if input == "today" {
+        return Ok(today);
+    }
+    
+    if input == "tomorrow" || input == "tmrw" {
+        return Ok(today + Duration::days(1));
+    }
+    
+    if input == "next week" {
+        return Ok(today + Duration::weeks(1));
+    }
+    
+    // Parse "in X days/weeks"
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.len() >= 3 && parts[0] == "in" {
+        if let Ok(n) = parts[1].parse::<i64>() {
+            match parts[2] {
+                "day" | "days" => return Ok(today + Duration::days(n)),
+                "week" | "weeks" => return Ok(today + Duration::weeks(n)),
+                _ => {}
+            }
+        }
+    }
+    
+    // Try to parse as standard date
+    NaiveDate::parse_from_str(&input, "%Y-%m-%d")
+        .map_err(|_| crate::error::MyceliumError::InvalidDate(input.to_string()))
+}
+
+/// Apply a template to get default priority and tags
+fn apply_template(template: &str, priority: &str, tags: Option<&str>) -> Result<(String, Option<String>)> {
+    // Check for custom templates file
+    let custom_templates_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".mycelium")
+        .join("templates.toml");
+    
+    if custom_templates_path.exists() {
+        if let Ok(content) = fs::read_to_string(&custom_templates_path) {
+            if let Ok(toml) = content.parse::<toml::Value>() {
+                if let Some(template_table) = toml.get(template) {
+                    let tpl_priority = template_table
+                        .get("priority")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(priority);
+                    
+                    let tpl_tags = template_table
+                        .get("tags")
+                        .and_then(|v| v.as_str());
+                    
+                    let final_tags = if let Some(t) = tags {
+                        Some(t.to_string())
+                    } else {
+                        tpl_tags.map(|t| t.to_string())
+                    };
+                    
+                    return Ok((tpl_priority.to_string(), final_tags));
+                }
+            }
+        }
+    }
+    
+    // Built-in templates
+    match template {
+        "bug" => Ok(("high".to_string(), Some("bug".to_string()))),
+        "feature" => Ok(("medium".to_string(), Some("feature".to_string()))),
+        "docs" => Ok(("low".to_string(), Some("documentation".to_string()))),
+        "refactor" => Ok(("medium".to_string(), Some("refactor".to_string()))),
+        "test" => Ok(("medium".to_string(), Some("testing".to_string()))),
+        _ => {
+            // Unknown template, just use provided values
+            Ok((priority.to_string(), tags.map(|t| t.to_string())))
+        }
+    }
 }

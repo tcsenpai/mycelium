@@ -13,6 +13,7 @@ pub struct Task {
     pub epic_id: Option<i64>,
     pub assignee_id: Option<i64>,
     pub due_date: Option<NaiveDate>,
+    pub tags: Option<String>,
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
 }
@@ -29,6 +30,7 @@ impl Task {
             epic_id: None,
             assignee_id: None,
             due_date: None,
+            tags: None,
             created_at: now,
             updated_at: now,
         }
@@ -56,6 +58,11 @@ impl Task {
 
     pub fn with_due_date(mut self, due_date: NaiveDate) -> Self {
         self.due_date = Some(due_date);
+        self
+    }
+
+    pub fn with_tags(mut self, tags: impl Into<String>) -> Self {
+        self.tags = Some(tags.into());
         self
     }
 

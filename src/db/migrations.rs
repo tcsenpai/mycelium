@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use crate::error::Result;
 
-const CURRENT_VERSION: i32 = 1;
+const CURRENT_VERSION: i32 = 2;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     create_migrations_table(conn)?;
@@ -11,6 +11,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if version < 1 {
         migrate_v1(conn)?;
         set_version(conn, 1)?;
+    }
+    
+    if version < 2 {
+        migrate_v2(conn)?;
+        set_version(conn, 2)?;
     }
     
     Ok(())
@@ -160,6 +165,22 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
     )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_external_refs_task ON external_refs(task_id)",
+        [],
+    )?;
+    
+    Ok(())
+}
+
+fn migrate_v2(conn: &Connection) -> Result<()> {
+    // Add tags column to tasks
+    conn.execute(
+        "ALTER TABLE tasks ADD COLUMN tags TEXT",
+        [],
+    )?;
+    
+    // Create index for tag search
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_tags ON tasks(tags)",
         [],
     )?;
     

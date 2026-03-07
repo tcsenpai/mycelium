@@ -73,7 +73,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
     })?;
     
     // Get tasks for this assignee
-    let tasks = db.list_tasks(None, None, None, Some(id), false, false)?;
+    let tasks = db.list_tasks(None, None, None, Some(id), false, false, None)?;
     
     if quiet {
         println!("{}", assignee.id);
@@ -130,7 +130,7 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
     })?;
     
     // Check for assigned tasks
-    let tasks = db.list_tasks(None, None, None, Some(id), false, false)?;
+    let tasks = db.list_tasks(None, None, None, Some(id), false, false, None)?;
     
     if !force && !tasks.is_empty() {
         println!("{} Assignee '{}' has {} task(s) assigned.", WARNING_PREFIX.yellow(), assignee.name, tasks.len());

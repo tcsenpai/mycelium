@@ -36,19 +36,22 @@ fn main() {
         },
         
         Commands::Task(cmd) => match cmd {
-            TaskCommands::Create { title, description, epic, priority, assignee, due } => {
-                commands::task::create(&title, description.as_deref(), epic, &priority, assignee, due.as_deref(), &cli.format, cli.quiet)
+            TaskCommands::Create { title, description, epic, priority, assignee, due, tags, template } => {
+                commands::task::create(&title, description.as_deref(), epic, &priority, assignee, due.as_deref(), tags.as_deref(), template.as_deref(), &cli.format, cli.quiet)
             }
-            TaskCommands::List { epic, status, priority, assignee, blocked, overdue } => {
-                commands::task::list(epic, status.as_deref(), priority.as_deref(), assignee, blocked, overdue, &cli.format, cli.quiet)
+            TaskCommands::List { epic, status, priority, assignee, blocked, overdue, tag } => {
+                commands::task::list(epic, status.as_deref(), priority.as_deref(), assignee, blocked, overdue, tag.as_deref(), &cli.format, cli.quiet)
+            }
+            TaskCommands::Batch { file } => {
+                commands::task::batch(&file, &cli.format, cli.quiet)
             }
             TaskCommands::Show { id } => {
                 commands::task::show(id, &cli.format, cli.quiet)
             }
-            TaskCommands::Update { id, title, description, status, priority, epic, assignee, due } => {
+            TaskCommands::Update { id, title, description, status, priority, epic, assignee, due, tags } => {
                 commands::task::update(
                     id, title.as_deref(), description.as_deref(), status.as_deref(), 
-                    priority.as_deref(), epic, assignee, due.as_deref(), &cli.format, cli.quiet
+                    priority.as_deref(), epic, assignee, due.as_deref(), tags.as_deref(), &cli.format, cli.quiet
                 )
             }
             TaskCommands::Delete { id, force } => {
@@ -107,7 +110,7 @@ fn main() {
         },
         
         Commands::List(args) => {
-            commands::list::execute(args.epic, args.status.as_deref(), args.priority.as_deref(), args.assignee, args.blocked, args.overdue, &cli.format, cli.quiet)
+            commands::list::execute(args.epic, args.status.as_deref(), args.priority.as_deref(), args.assignee, args.blocked, args.overdue, args.tag.as_deref(), &cli.format, cli.quiet)
         }
         
         Commands::Summary => {
