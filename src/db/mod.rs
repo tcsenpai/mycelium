@@ -31,8 +31,12 @@ impl Database {
         Ok(db)
     }
 
-    fn migrate(&mut self) -> Result<()> {
+    pub fn migrate(&mut self) -> Result<()> {
         migrations::run_migrations(&mut self.conn)
+    }
+    
+    pub fn get_conn(&self) -> &Connection {
+        &self.conn
     }
 
     pub fn transaction<T, F>(&mut self, f: F) -> Result<T>

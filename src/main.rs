@@ -125,6 +125,10 @@ fn main() {
                 commands::export::csv(output.as_deref(), cli.quiet)
             }
         }
+        
+        Commands::Doctor { fix } => {
+            commands::doctor::execute(fix, cli.quiet)
+        }
     };
     
     if let Err(e) = result {

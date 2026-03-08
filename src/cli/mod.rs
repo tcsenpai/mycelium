@@ -49,6 +49,13 @@ pub enum Commands {
     /// Export data
     #[command(subcommand)]
     Export(ExportCommands),
+    
+    /// Run health checks on the project
+    Doctor {
+        /// Automatically fix issues where possible
+        #[arg(short, long)]
+        fix: bool,
+    },
 }
 
 #[derive(Subcommand)]
