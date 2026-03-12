@@ -310,7 +310,7 @@ impl Database {
 
         if blocked_only {
             result.retain(|t| {
-                self.get_blocking_tasks(t.id).map(|v| !v.is_empty()).unwrap_or(false)
+                self.get_open_blockers(t.id).map(|v| !v.is_empty()).unwrap_or(false)
             });
         }
 
@@ -671,5 +671,4 @@ pub struct Summary {
     pub overdue_tasks: i64,
     pub blocked_tasks: i64,
 }
-
 

@@ -53,7 +53,7 @@ pub enum Commands {
     /// Run health checks on the project
     Doctor {
         /// Automatically fix issues where possible
-        #[arg(short, long)]
+        #[arg(long)]
         fix: bool,
     },
 }
@@ -104,7 +104,7 @@ pub enum EpicCommands {
         id: i64,
         
         /// Force deletion without confirmation
-        #[arg(short, long)]
+        #[arg(long)]
         force: bool,
     },
 }
@@ -134,15 +134,15 @@ pub enum TaskCommands {
         assignee: Option<i64>,
         
         /// Due date (YYYY-MM-DD)
-        #[arg(short, long)]
+        #[arg(short = 'u', long)]
         due: Option<String>,
         
         /// Tags (comma-separated, e.g., "frontend,urgent")
-        #[arg(short, long)]
+        #[arg(short = 'g', long)]
         tags: Option<String>,
         
         /// Use a template
-        #[arg(short, long)]
+        #[arg(short = 'm', long)]
         template: Option<String>,
     },
     
@@ -220,11 +220,11 @@ pub enum TaskCommands {
         assignee: Option<i64>,
         
         /// New due date (YYYY-MM-DD)
-        #[arg(short, long)]
+        #[arg(short = 'u', long)]
         due: Option<String>,
         
         /// New tags (comma-separated, use - to remove)
-        #[arg(short, long)]
+        #[arg(short = 'g', long)]
         tags: Option<String>,
     },
     
@@ -234,7 +234,7 @@ pub enum TaskCommands {
         id: i64,
         
         /// Force deletion without confirmation
-        #[arg(short, long)]
+        #[arg(long)]
         force: bool,
     },
     
@@ -263,7 +263,7 @@ pub enum TaskCommands {
         id: i64,
         
         /// Force close even if blocked
-        #[arg(short, long)]
+        #[arg(long)]
         force: bool,
     },
     

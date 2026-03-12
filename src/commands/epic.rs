@@ -160,8 +160,8 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
     let tasks = db.list_tasks(Some(id), None, None, None, false, false, None)?;
     
     if !force && !tasks.is_empty() {
-        println!("{} Epic '{}' has {} task(s).", WARNING_PREFIX.yellow(), epic.title, tasks.len());
-        if !crate::commands::confirm(&format!("Delete epic #{} and all its tasks?", id)) {
+        println!("{} Epic '{}' has {} linked task(s).", WARNING_PREFIX.yellow(), epic.title, tasks.len());
+        if !crate::commands::confirm(&format!("Delete epic #{} and detach those tasks from the epic?", id)) {
             println!("Cancelled.");
             return Ok(());
         }

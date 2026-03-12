@@ -1,0 +1,32 @@
+[package]
+name = "mycui"
+version = "0.1.0"
+description = "A native desktop dashboard for Mycelium task management"
+authors = ["Mycelium Contributors"]
+license = "MIT"
+repository = "https://github.com/tcsenpai/mycelium"
+edition = "2021"
+rust-version = "1.75"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.35", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+
+[dependencies.rusqlite]
+version = "0.32"
+features = ["bundled", "chrono"]
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

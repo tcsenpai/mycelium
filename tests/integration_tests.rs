@@ -7,7 +7,16 @@ fn myc_path() -> PathBuf {
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_myc") {
         return PathBuf::from(path);
     }
-    // Otherwise assume we're in the target directory
+
+    let debug_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("debug")
+        .join("myc");
+    if debug_path.exists() {
+        return debug_path;
+    }
+
+    // Otherwise fall back to release
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target")
         .join("release")
@@ -195,4 +204,105 @@ fn test_export() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("epics"));
     assert!(stdout.contains("tasks"));
+}
+
+#[test]
+fn test_task_create_help_does_not_panic() {
+    let temp = TempDir::new().unwrap();
+    let output = myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--help")
+        .output()
+        .expect("Failed to show help");
+
+    print_output(&output);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Create a new task"));
+}
+
+#[test]
+fn test_blocked_list_only_shows_tasks_with_open_blockers() {
+    let temp = TempDir::new().unwrap();
+    myc_cmd(&temp).arg("init").output().expect("Failed to init");
+    myc_cmd(&temp).arg("task").arg("create").arg("--title").arg("Blocker").output().expect("Failed to create blocker");
+    myc_cmd(&temp).arg("task").arg("create").arg("--title").arg("Blocked").output().expect("Failed to create blocked task");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("link")
+        .arg("blocks")
+        .arg("--task")
+        .arg("1")
+        .arg("2")
+        .output()
+        .expect("Failed to link dependency");
+
+    let output = myc_cmd(&temp)
+        .arg("task")
+        .arg("list")
+        .arg("--blocked")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .expect("Failed to list blocked tasks");
+    print_output(&output);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"id\": 2"));
+
+    myc_cmd(&temp).arg("task").arg("close").arg("1").output().expect("Failed to close blocker");
+
+    let output = myc_cmd(&temp)
+        .arg("task")
+        .arg("list")
+        .arg("--blocked")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .expect("Failed to list blocked tasks after closing blocker");
+    print_output(&output);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "[]");
+}
+
+#[test]
+fn test_delete_epic_detaches_tasks_instead_of_deleting_them() {
+    let temp = TempDir::new().unwrap();
+    myc_cmd(&temp).arg("init").output().expect("Failed to init");
+    myc_cmd(&temp).arg("epic").arg("create").arg("--title").arg("Epic").output().expect("Failed to create epic");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg("Task")
+        .arg("--epic")
+        .arg("1")
+        .output()
+        .expect("Failed to create task");
+
+    let output = myc_cmd(&temp)
+        .arg("epic")
+        .arg("delete")
+        .arg("1")
+        .arg("--force")
+        .output()
+        .expect("Failed to delete epic");
+    print_output(&output);
+    assert!(output.status.success());
+
+    let output = myc_cmd(&temp)
+        .arg("task")
+        .arg("show")
+        .arg("1")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .expect("Failed to show task");
+    print_output(&output);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"id\": 1"));
+    assert!(stdout.contains("\"epic_id\": null"));
 }
