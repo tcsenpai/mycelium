@@ -20,7 +20,7 @@ myc init
 myc epic create --title "Feature X" --description "Build feature X"
 
 # Create tasks within an epic
-myc task create --title "Implement Y" --epic 1 --priority high --due 2025-12-31
+myc task create --title "Implement Y" --description "Build the implementation for Y" --epic 1 --priority high --due 2025-12-31
 
 # Task priorities: low, medium, high, critical
 # Task status: open, closed
@@ -57,8 +57,8 @@ myc export csv
 
 ### Data Model
 
-- **Epic**: A large body of work (e.g., a feature or milestone)
-- **Task**: A unit of work within an epic
+- **Epic**: A large body of work with a title and optional description (e.g., a feature or milestone)
+- **Task**: A unit of work with a title and optional description, optionally linked to an epic
 - **Dependency**: Task A blocks Task B (B cannot close until A is closed)
 - **Assignee**: Person assigned to a task (can have GitHub username)
 - **External Ref**: Link to GitHub issues/PRs or URLs
@@ -78,9 +78,9 @@ When working on this project:
 
 1. Check existing tasks: `myc task list`
 2. Check blocked tasks: `myc task list --blocked`
-3. Create tasks for new work: `myc task create --title "..." --epic N`
+3. Create tasks for new work: `myc task create --title "..." --description "..." --epic N`
 4. Mark tasks complete when done: `myc task close N`
-5. Use `--json` flag for machine-readable output: `myc task list --json`
+5. Use `--format json` for machine-readable output: `myc task list --format json`
 "#;
 
 pub fn execute() -> Result<()> {
