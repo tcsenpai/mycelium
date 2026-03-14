@@ -18,7 +18,7 @@ A robust, production-grade task/plan manager CLI designed for reliability, agent
 
 ## Installation
 
-### From Source
+### CLI (`myc`) — From Source
 
 ```bash
 git clone https://github.com/tcsenpai/mycelium
@@ -28,9 +28,42 @@ cargo build --release
 sudo cp target/release/myc /usr/local/bin/
 ```
 
-### Pre-built Binaries
+### GUI (`MycUI`) — From Source
 
-Download from the [releases page](https://github.com/tcsenpai/mycelium/releases).
+MycUI is a [Tauri](https://tauri.app) desktop app built with React and TypeScript.
+
+**Prerequisites**: [Rust](https://rustup.rs), [Bun](https://bun.sh), and [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
+
+```bash
+cd mycui
+bun install
+bun run tauri:build
+```
+
+The built app will be in `mycui/src-tauri/target/release/bundle/` with platform-specific installers (`.deb`, `.AppImage`, `.dmg`, `.msi`).
+
+For development:
+
+```bash
+cd mycui
+bun install
+bun run tauri:dev
+```
+
+### One-Line Install (Linux & macOS)
+
+```bash
+git clone https://github.com/tcsenpai/mycelium && cd mycelium && ./install.sh
+```
+
+The install script detects your platform, builds, and installs both `myc` (CLI) and `MycUI` (GUI). On macOS, MycUI is installed as `/Applications/MycUI.app`. On Linux, both binaries go to `/usr/local/bin/`.
+
+```bash
+./install.sh --cli       # Install only the CLI
+./install.sh --gui       # Install only MycUI
+./install.sh --all       # Install both (default)
+INSTALL_DIR=~/.local/bin ./install.sh --cli  # Custom install path (CLI)
+```
 
 ## Quick Start
 
@@ -42,8 +75,8 @@ myc init
 myc epic create --title "Feature X" --description "Build feature X"
 
 # Create tasks
-myc task create --title "Design API" --epic 1 --priority high
-myc task create --title "Implement backend" --epic 1 --priority critical --due 2025-06-01
+myc task create --title "Design API" --description "Define the API surface and contracts" --epic 1 --priority high
+myc task create --title "Implement backend" --description "Build the backend services and persistence layer" --epic 1 --priority critical --due 2025-06-01
 
 # Set up dependencies (task 1 blocks task 2)
 myc task link blocks --task 1 2
@@ -66,6 +99,7 @@ myc summary
 ```bash
 myc init                    # Initialize mycelium in current directory
 myc summary                 # Show project overview
+myc doctor                  # Check system health and configuration
 ```
 
 ### Epics
@@ -155,7 +189,7 @@ Epic
 └── Tasks[]
 
 Task
-├── id, title, description
+├── id, title, description (optional)
 ├── status (open/closed), priority (low/medium/high/critical)
 ├── epic_id (optional), assignee_id (optional)
 ├── due_date (optional)
@@ -182,6 +216,9 @@ Mycelium is optimized for agentic workflows:
 ```bash
 # Use --quiet to get just IDs
 myc task create --title "New task" --quiet  # outputs: 42
+
+# Include a description when useful
+myc task create --title "New task" --description "Explain the work item"
 
 # Use --format json for parsing
 myc task list --format json
@@ -219,14 +256,15 @@ No configuration needed! All data is stored in the project-local `.mycelium/` di
 git clone https://github.com/tcsenpai/mycelium
 cd mycelium
 
-# Build
+# Build & test the CLI
 cargo build --release
-
-# Test
 cargo test
-
-# Run locally
 cargo run -- init
+
+# Run MycUI in dev mode
+cd mycui
+bun install
+bun run tauri:dev
 ```
 
 ## Architecture
@@ -235,6 +273,9 @@ cargo run -- init
 - **SQLite** - Embedded, git-trackable, ACID-compliant
 - **Clap** - Command-line parsing with derive macros
 - **Rusqlite** - SQLite bindings with bundled lib
+- **Tauri** - Desktop GUI framework (MycUI)
+- **React + TypeScript** - MycUI frontend
+- **Tailwind CSS** - MycUI styling
 
 ## License
 
@@ -242,7 +283,7 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ## Contributing
 
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+Contributions welcome! Feel free to open issues and pull requests.
 
 ## Acknowledgments
 
