@@ -603,6 +603,197 @@ impl Database {
         Ok(result)
     }
 
+    // Task note operations
+    pub fn add_task_note(&mut self, task_id: i64, content: &str) -> Result<TaskNote> {
+        let now = chrono::Local::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO task_notes (task_id, content, created_at) VALUES (?1, ?2, ?3)",
+            (task_id, content, &now),
+        )?;
+        
+
+        
+        let id = self.conn.last_insert_rowid();
+        self.get_task_note(id)
+            .map(|n| n.ok_or_else(|| MyceliumError::NotFound { 
+                entity: "task_note".to_string(), 
+                id: id.to_string() 
+            }))?
+    }
+
+    pub fn get_task_note(&self, id: i64) -> Result<Option<TaskNote>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, task_id, content, created_at FROM task_notes WHERE id = ?1"
+        )?;
+        
+        let note = stmt.query_row([id], |row| {
+            Ok(TaskNote {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                content: row.get(2)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .unwrap().with_timezone(&chrono::Local),
+            })
+        });
+
+        match note {
+            Ok(n) => Ok(Some(n)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn list_task_notes(&self, task_id: i64) -> Result<Vec<TaskNote>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, task_id, content, created_at FROM task_notes WHERE task_id = ?1 ORDER BY created_at DESC"
+        )?;
+        
+        let notes = stmt.query_map([task_id], |row| {
+            Ok(TaskNote {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                content: row.get(2)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .unwrap().with_timezone(&chrono::Local),
+            })
+        })?;
+
+        notes.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    pub fn delete_task_note(&mut self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM task_notes WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // Batch operations
+    pub fn batch_close_tasks(&mut self, task_ids: &[i64], force: bool) -> Result<Vec<Task>> {
+        let mut closed_tasks = Vec::new();
+        let now = chrono::Local::now().to_rfc3339();
+        
+        for &id in task_ids {
+            // Check for blockers unless force is true
+            if !force {
+                let blockers = self.get_open_blockers(id)?;
+                if !blockers.is_empty() {
+                    continue; // Skip this task if blocked
+                }
+            }
+            
+            // Update task status
+            self.conn.execute(
+                "UPDATE tasks SET status = 'closed', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
+                (&now, id),
+            )?;
+            
+            if let Ok(Some(task)) = self.get_task(id) {
+                if task.status == Status::Closed {
+                    closed_tasks.push(task);
+                }
+            }
+        }
+        
+        Ok(closed_tasks)
+    }
+
+    pub fn batch_add_tag(&mut self, task_ids: &[i64], tag: &str) -> Result<Vec<Task>> {
+        let mut updated_tasks = Vec::new();
+        let now = chrono::Local::now().to_rfc3339();
+        
+        for &id in task_ids {
+            if let Ok(Some(task)) = self.get_task(id) {
+                let current_tags = task.tags.unwrap_or_default();
+                let new_tags = if current_tags.is_empty() {
+                    tag.to_string()
+                } else if current_tags.contains(tag) {
+                    current_tags // Tag already exists
+                } else {
+                    format!("{}, {}", current_tags, tag)
+                };
+                
+                self.conn.execute(
+                    "UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3",
+                    (&new_tags, &now, id),
+                )?;
+                
+                if let Ok(Some(updated)) = self.get_task(id) {
+                    updated_tasks.push(updated);
+                }
+            }
+        }
+        
+        Ok(updated_tasks)
+    }
+
+    pub fn batch_move_to_epic(&mut self, task_ids: &[i64], epic_id: Option<i64>) -> Result<Vec<Task>> {
+        let mut updated_tasks = Vec::new();
+        let now = chrono::Local::now().to_rfc3339();
+        
+        // Verify epic exists if specified
+        if let Some(eid) = epic_id {
+            if self.get_epic(eid)?.is_none() {
+                return Err(MyceliumError::NotFound { 
+                    entity: "epic".to_string(), 
+                    id: eid.to_string() 
+                });
+            }
+        }
+        
+        for &id in task_ids {
+            self.conn.execute(
+                "UPDATE tasks SET epic_id = ?1, updated_at = ?2 WHERE id = ?3",
+                (epic_id, &now, id),
+            )?;
+            
+            if let Ok(Some(updated)) = self.get_task(id) {
+                updated_tasks.push(updated);
+            }
+        }
+        
+        Ok(updated_tasks)
+    }
+
+    // Task cloning
+    pub fn clone_task(&mut self, task_id: i64, new_title: Option<&str>) -> Result<Task> {
+        let original = self.get_task(task_id)?.ok_or_else(|| MyceliumError::NotFound { 
+            entity: "task".to_string(), 
+            id: task_id.to_string() 
+        })?;
+        
+        let default_title = format!("{} (copy)", original.title);
+        let title = new_title.unwrap_or(&default_title);
+        let now = chrono::Local::now();
+        let now_str = now.to_rfc3339();
+        
+        self.conn.execute(
+            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at) 
+             VALUES (?1, ?2, 'open', ?3, ?4, NULL, ?5, ?6, ?7, ?7)",
+            (
+                title,
+                original.description,
+                original.priority.to_string(),
+                original.epic_id,
+                original.due_date.map(|d| d.to_string()),
+                original.tags,
+                &now_str,
+            ),
+        )?;
+        
+        let new_id = self.conn.last_insert_rowid();
+        
+        // Clone external references
+        let refs = self.list_external_refs(task_id)?;
+        for ext_ref in refs {
+            self.add_external_ref(new_id, ext_ref.ref_type, &ext_ref.reference)?;
+        }
+        
+        self.get_task(new_id)
+            .map(|t| t.ok_or_else(|| MyceliumError::NotFound { 
+                entity: "task".to_string(), 
+                id: new_id.to_string() 
+            }))?
+    }
+
     // External reference operations
     pub fn add_external_ref(&mut self, task_id: i64, ref_type: ExternalRefType, reference: &str) -> Result<ExternalRef> {
         self.conn.execute(

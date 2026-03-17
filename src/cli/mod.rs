@@ -276,6 +276,66 @@ pub enum TaskCommands {
         /// Task ID
         id: i64,
     },
+    
+    /// Add a note to a task
+    Note {
+        /// Task ID
+        task_id: i64,
+        
+        /// Note content
+        content: String,
+    },
+    
+    /// Show task notes
+    Notes {
+        /// Task ID
+        task_id: i64,
+    },
+    
+    /// Clone a task
+    Clone {
+        /// Task ID to clone
+        id: i64,
+        
+        /// New title (optional, defaults to "Original (copy)")
+        #[arg(short, long)]
+        title: Option<String>,
+    },
+    
+    /// Batch operations on multiple tasks
+    #[command(subcommand)]
+    BatchOp(BatchOpCommands),
+}
+
+#[derive(Subcommand)]
+pub enum BatchOpCommands {
+    /// Close multiple tasks
+    Close {
+        /// Task IDs to close
+        ids: Vec<i64>,
+        
+        /// Force close even if blocked
+        #[arg(long)]
+        force: bool,
+    },
+    
+    /// Add a tag to multiple tasks
+    Tag {
+        /// Tag to add
+        tag: String,
+        
+        /// Task IDs
+        ids: Vec<i64>,
+    },
+    
+    /// Move multiple tasks to an epic
+    Move {
+        /// Epic ID (use 0 for no epic)
+        epic_id: i64,
+        
+        /// Task IDs
+        ids: Vec<i64>,
+    },
 }
 
 #[derive(Subcommand)]

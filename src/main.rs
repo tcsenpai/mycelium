@@ -6,7 +6,7 @@ mod db;
 mod error;
 mod models;
 
-use cli::{Cli, Commands, EpicCommands, TaskCommands, AssigneeCommands, DepsCommands, ExportCommands, LinkCommands};
+use cli::{Cli, Commands, EpicCommands, TaskCommands, AssigneeCommands, DepsCommands, ExportCommands, LinkCommands, BatchOpCommands};
 use error::handle_error;
 
 pub use commands::{ERROR_PREFIX, SUCCESS_PREFIX, INFO_PREFIX, WARNING_PREFIX};
@@ -82,6 +82,26 @@ fn main() {
             }
             TaskCommands::Reopen { id } => {
                 commands::task::reopen(id, cli.quiet)
+            }
+            TaskCommands::Note { task_id, content } => {
+                commands::task::add_note(task_id, &content, &cli.format, cli.quiet)
+            }
+            TaskCommands::Notes { task_id } => {
+                commands::task::show_notes(task_id, &cli.format, cli.quiet)
+            }
+            TaskCommands::Clone { id, title } => {
+                commands::task::clone_task(id, title.as_deref(), &cli.format, cli.quiet)
+            }
+            TaskCommands::BatchOp(cmd) => match cmd {
+                BatchOpCommands::Close { ids, force } => {
+                    commands::task::batch_close(&ids, force, cli.quiet)
+                }
+                BatchOpCommands::Tag { tag, ids } => {
+                    commands::task::batch_tag(&tag, &ids, cli.quiet)
+                }
+                BatchOpCommands::Move { epic_id, ids } => {
+                    commands::task::batch_move(epic_id, &ids, cli.quiet)
+                }
             }
         },
         

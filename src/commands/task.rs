@@ -287,6 +287,32 @@ fn print_grouped_view(
     tasks: &[crate::models::Task],
     epic_map: &HashMap<i64, Epic>,
 ) -> Result<()> {
+    println!("\n{}", "📁 Epics".bold().underline());
+    
+    // Print all epics (including empty ones)
+    let mut all_epics: Vec<&Epic> = epic_map.values().collect();
+    all_epics.sort_by_key(|e| e.id);
+    
+    if all_epics.is_empty() {
+        println!("  No epics yet. Create one with: myc epic create --title \"Epic Name\"");
+    } else {
+        let mut epic_table = Table::new();
+        epic_table.set_content_arrangement(ContentArrangement::Dynamic);
+        epic_table.set_header(vec!["ID", "Title", "Status", "Tasks"]);
+        
+        for epic in &all_epics {
+            let task_count = tasks.iter().filter(|t| t.epic_id == Some(epic.id)).count();
+            epic_table.add_row(vec![
+                format!("E#{}", epic.id).cyan().to_string(),
+                epic.title.clone(),
+                format!("{} {}", epic.status.emoji(), epic.status),
+                format!("{} tasks", task_count),
+            ]);
+        }
+        
+        println!("{}", epic_table);
+    }
+    
     // Group tasks by epic
     let mut epic_tasks: HashMap<Option<i64>, Vec<&crate::models::Task>> = HashMap::new();
     for task in tasks {
@@ -304,75 +330,79 @@ fn print_grouped_view(
     
     let mut total_shown = 0;
     
-    for epic_id in epic_order {
-        let tasks_in_epic = epic_tasks.get(&epic_id).unwrap();
+    if !tasks.is_empty() {
+        println!("\n{}", "📋 Tasks".bold().underline());
         
-        // Print epic header
-        match epic_id {
-            Some(id) => {
-                if let Some(epic) = epic_map.get(&id) {
-                    let status_icon = if epic.status == Status::Open { "📂" } else { "📁" };
-                    println!("\n{} {} {} {}", 
-                        status_icon,
-                        format!("E#{}:", id).cyan().bold(),
-                        epic.title.bold(),
+        for epic_id in epic_order {
+            let tasks_in_epic = epic_tasks.get(&epic_id).unwrap();
+            
+            // Print epic header
+            match epic_id {
+                Some(id) => {
+                    if let Some(epic) = epic_map.get(&id) {
+                        let status_icon = if epic.status == Status::Open { "📂" } else { "📁" };
+                        println!("\n{} {} {} {}", 
+                            status_icon,
+                            format!("E#{}:", id).cyan().bold(),
+                            epic.title.bold(),
+                            format!("({} tasks)", tasks_in_epic.len()).dimmed()
+                        );
+                    } else {
+                        println!("\n{} {} {}", 
+                            "📂".cyan(),
+                            format!("E#{}:", id).cyan().bold(),
+                            format!("(Unknown epic, {} tasks)", tasks_in_epic.len()).dimmed()
+                        );
+                    }
+                }
+                None => {
+                    println!("\n{} {}", 
+                        "📂 No Epic:".cyan().bold(),
                         format!("({} tasks)", tasks_in_epic.len()).dimmed()
-                    );
-                } else {
-                    println!("\n{} {} {}", 
-                        "📂".cyan(),
-                        format!("E#{}:", id).cyan().bold(),
-                        format!("(Unknown epic, {} tasks)", tasks_in_epic.len()).dimmed()
                     );
                 }
             }
-            None => {
-                println!("\n{} {}", 
-                    "📂 No Epic:".cyan().bold(),
-                    format!("({} tasks)", tasks_in_epic.len()).dimmed()
-                );
-            }
-        }
-        
-        // Create table for tasks in this epic
-        let mut table = Table::new();
-        table.set_content_arrangement(ContentArrangement::Dynamic);
-        table.set_header(vec!["ID", "Title", "Status", "Priority", "Due", "Tags"]);
-        
-        // Sort tasks by priority, then creation date
-        let mut sorted_tasks = tasks_in_epic.clone();
-        sorted_tasks.sort_by(|a, b| {
-            let priority_ord = format!("{:?}", a.priority).cmp(&format!("{:?}", b.priority));
-            if priority_ord != std::cmp::Ordering::Equal {
-                priority_ord
-            } else {
-                b.created_at.cmp(&a.created_at)
-            }
-        });
-        
-        for task in sorted_tasks {
-            let due = task.due_date.map(|d| d.to_string()).unwrap_or_else(|| "-".to_string());
-            let due_str = if task.is_overdue() {
-                due.red().to_string()
-            } else {
-                due
-            };
-            let tags = task.tags.as_ref().map(|t| {
-                if t.len() > 15 { format!("{}...", &t[..15]) } else { t.clone() }
-            }).unwrap_or_else(|| "-".to_string());
             
-            table.add_row(vec![
-                format!("#{}", task.id).dimmed().to_string(),
-                task.title.clone(),
-                format!("{} {}", task.status.emoji(), task.status),
-                format!("{} {}", task.priority.emoji(), task.priority),
-                due_str,
-                tags,
-            ]);
-            total_shown += 1;
+            // Create table for tasks in this epic
+            let mut table = Table::new();
+            table.set_content_arrangement(ContentArrangement::Dynamic);
+            table.set_header(vec!["ID", "Title", "Status", "Priority", "Due", "Tags"]);
+            
+            // Sort tasks by priority, then creation date
+            let mut sorted_tasks = tasks_in_epic.clone();
+            sorted_tasks.sort_by(|a, b| {
+                let priority_ord = format!("{:?}", a.priority).cmp(&format!("{:?}", b.priority));
+                if priority_ord != std::cmp::Ordering::Equal {
+                    priority_ord
+                } else {
+                    b.created_at.cmp(&a.created_at)
+                }
+            });
+            
+            for task in sorted_tasks {
+                let due = task.due_date.map(|d| d.to_string()).unwrap_or_else(|| "-".to_string());
+                let due_str = if task.is_overdue() {
+                    due.red().to_string()
+                } else {
+                    due
+                };
+                let tags = task.tags.as_ref().map(|t| {
+                    if t.len() > 15 { format!("{}...", &t[..15]) } else { t.clone() }
+                }).unwrap_or_else(|| "-".to_string());
+                
+                table.add_row(vec![
+                    format!("#{}", task.id).dimmed().to_string(),
+                    task.title.clone(),
+                    format!("{} {}", task.status.emoji(), task.status),
+                    format!("{} {}", task.priority.emoji(), task.priority),
+                    due_str,
+                    tags,
+                ]);
+                total_shown += 1;
+            }
+            
+            println!("{}", table);
         }
-        
-        println!("{}", table);
     }
     
     let status_filter_msg = if tasks.iter().all(|t| t.status == Status::Open) {
@@ -823,4 +853,193 @@ fn apply_template(template: &str, priority: &str, tags: Option<&str>) -> Result<
             Ok((priority.to_string(), tags.map(|t| t.to_string())))
         }
     }
+}
+
+/// Add a note to a task
+pub fn add_note(task_id: i64, content: &str, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    
+    // Verify task exists
+    let task = db.get_task(task_id)?.ok_or_else(|| crate::error::MyceliumError::NotFound {
+        entity: "task".to_string(),
+        id: task_id.to_string(),
+    })?;
+    
+    let note = db.add_task_note(task_id, content)?;
+    
+    if quiet {
+        println!("{}", note.id);
+        return Ok(());
+    }
+    
+    match format {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&note)?),
+        OutputFormat::Table => {
+            println!("{} Added note #{} to task #{}: {}", 
+                SUCCESS_PREFIX.green(), 
+                note.id.to_string().cyan(),
+                task_id.to_string().cyan(),
+                task.title.bold()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Show notes for a task
+pub fn show_notes(task_id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let db = ensure_initialized()?;
+    
+    // Verify task exists
+    let task = db.get_task(task_id)?.ok_or_else(|| crate::error::MyceliumError::NotFound {
+        entity: "task".to_string(),
+        id: task_id.to_string(),
+    })?;
+    
+    let notes = db.list_task_notes(task_id)?;
+    
+    if quiet {
+        for note in &notes {
+            println!("{}", note.id);
+        }
+        return Ok(());
+    }
+    
+    match format {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&notes)?),
+        OutputFormat::Table => {
+            println!("{} Notes for task #{}: {}", INFO_PREFIX.blue(), task_id.to_string().cyan(), task.title.bold());
+            
+            if notes.is_empty() {
+                println!("\n  No notes yet.");
+            } else {
+                println!();
+                for note in notes {
+                    println!("  {} {}: {}", 
+                        "📝".cyan(),
+                        note.created_at.format("%Y-%m-%d %H:%M").to_string().dimmed(),
+                        note.content
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Clone a task
+pub fn clone_task(task_id: i64, new_title: Option<&str>, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    
+    let original = db.get_task(task_id)?.ok_or_else(|| crate::error::MyceliumError::NotFound {
+        entity: "task".to_string(),
+        id: task_id.to_string(),
+    })?;
+    
+    let new_task = db.clone_task(task_id, new_title)?;
+    
+    if quiet {
+        println!("{}", new_task.id);
+        return Ok(());
+    }
+    
+    match format {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&new_task)?),
+        OutputFormat::Table => {
+            println!("{} Cloned task #{} to #{}: {}", 
+                SUCCESS_PREFIX.green(), 
+                task_id.to_string().cyan(),
+                new_task.id.to_string().cyan().bold(),
+                new_task.title.bold()
+            );
+            println!("  Original: {}", original.title.dimmed());
+        }
+    }
+    Ok(())
+}
+
+/// Batch close multiple tasks
+pub fn batch_close(task_ids: &[i64], force: bool, quiet: bool) -> Result<()> {
+    if task_ids.is_empty() {
+        return Ok(());
+    }
+    
+    let mut db = ensure_initialized()?;
+    let closed_tasks = db.batch_close_tasks(task_ids, force)?;
+    
+    let skipped_count = task_ids.len() - closed_tasks.len();
+    
+    if !quiet {
+        if closed_tasks.is_empty() {
+            if skipped_count > 0 && !force {
+                println!("{} No tasks closed. {} task(s) may be blocked (use --force to override).", 
+                    INFO_PREFIX.blue(), skipped_count);
+            } else {
+                println!("{} No tasks were closed.", INFO_PREFIX.blue());
+            }
+        } else {
+            println!("{} Closed {} task(s)", SUCCESS_PREFIX.green(), closed_tasks.len());
+            for task in &closed_tasks {
+                println!("  - #{}: {}", task.id, task.title);
+            }
+            if skipped_count > 0 && !force {
+                println!("\n{} Skipped {} blocked task(s) (use --force to override)", 
+                    INFO_PREFIX.blue(), skipped_count);
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Batch tag multiple tasks
+pub fn batch_tag(tag: &str, task_ids: &[i64], quiet: bool) -> Result<()> {
+    if task_ids.is_empty() {
+        return Ok(());
+    }
+    
+    let mut db = ensure_initialized()?;
+    let updated_tasks = db.batch_add_tag(task_ids, tag)?;
+    
+    if !quiet {
+        println!("{} Added tag '{}' to {} task(s)", SUCCESS_PREFIX.green(), tag.yellow(), updated_tasks.len());
+        for task in &updated_tasks {
+            println!("  - #{}: {}", task.id, task.title);
+        }
+    }
+    
+    Ok(())
+}
+
+/// Batch move multiple tasks to an epic
+pub fn batch_move(epic_id: i64, task_ids: &[i64], quiet: bool) -> Result<()> {
+    if task_ids.is_empty() {
+        return Ok(());
+    }
+    
+    let mut db = ensure_initialized()?;
+    
+    // Convert 0 to None (no epic)
+    let epic_id_opt = if epic_id == 0 { None } else { Some(epic_id) };
+    
+    // Get epic name for display
+    let epic_name = if let Some(eid) = epic_id_opt {
+        match db.get_epic(eid)? {
+            Some(epic) => format!("E#{}: {}", eid, epic.title),
+            None => format!("E#{} (not found)", eid),
+        }
+    } else {
+        "No Epic".to_string()
+    };
+    
+    let updated_tasks = db.batch_move_to_epic(task_ids, epic_id_opt)?;
+    
+    if !quiet {
+        println!("{} Moved {} task(s) to {}", SUCCESS_PREFIX.green(), updated_tasks.len(), epic_name.cyan());
+        for task in &updated_tasks {
+            println!("  - #{}: {}", task.id, task.title);
+        }
+    }
+    
+    Ok(())
 }
