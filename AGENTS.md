@@ -19,11 +19,12 @@ myc task create --title "Implement Y" --description "Build the implementation fo
 # Task priorities: low, medium, high, critical
 # Task status: open, closed
 
-# List tasks
-myc task list
-myc task list --epic 1
-myc task list --overdue
-myc task list --blocked
+# List tasks and epics
+myc list                    # Shows epics + tasks (tree view if dependencies exist)
+myc list --epic 1
+myc list --overdue
+myc list --blocked
+myc list --all              # Show all tasks including closed
 
 # Manage dependencies (task 1 blocks task 2)
 myc task link blocks --task 1 2
@@ -31,6 +32,18 @@ myc deps show 2
 
 # Close tasks (blocked tasks cannot be closed without --force)
 myc task close 1
+
+# Batch operations (useful for bulk updates)
+myc task batch-op close 1 2 3 [--force]     # Close multiple tasks
+myc task batch-op tag urgent 1 2 3          # Tag multiple tasks
+myc task batch-op move 1 4 5 6              # Move tasks to epic (0 = no epic)
+
+# Task notes (useful for progress tracking)
+myc task note 1 "Progress update..."        # Add a note to a task
+myc task notes 1                            # View all notes for a task
+
+# Task cloning (useful for similar tasks)
+myc task clone 1 [--title "New Title"]      # Clone a task with all metadata
 
 # Assign tasks
 myc assignee create --name "Alice" --github "alice"
@@ -56,6 +69,7 @@ myc export csv
 - **Dependency**: Task A blocks Task B (B cannot close until A is closed)
 - **Assignee**: Person assigned to a task (can have GitHub username)
 - **External Ref**: Link to GitHub issues/PRs or URLs
+- **Task Note**: A comment or progress note added to a task
 
 ### Git Tracking
 
@@ -70,8 +84,11 @@ git commit -m "Add mycelium project tracking"
 
 When working on this project:
 
-1. Check existing tasks: `myc task list`
-2. Check blocked tasks: `myc task list --blocked`
+1. Check existing tasks: `myc list`
+2. Check blocked tasks: `myc list --blocked`
 3. Create tasks for new work: `myc task create --title "..." --description "..." --epic N`
-4. Mark tasks complete when done: `myc task close N`
-5. Use `--format json` for machine-readable output: `myc task list --format json`
+4. Add progress notes to tasks: `myc task note <id> "Progress update..."`
+5. Clone similar tasks: `myc task clone <id> --title "New task"`
+6. Batch close tasks when done: `myc task batch-op close <id> [<id>...]`
+7. Mark tasks complete when done: `myc task close N`
+8. Use `--format json` for machine-readable output: `myc list --format json`
