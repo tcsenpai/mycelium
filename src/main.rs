@@ -39,8 +39,8 @@ fn main() {
             TaskCommands::Create { title, description, epic, priority, assignee, due, tags, template } => {
                 commands::task::create(&title, description.as_deref(), epic, &priority, assignee, due.as_deref(), tags.as_deref(), template.as_deref(), &cli.format, cli.quiet)
             }
-            TaskCommands::List { epic, status, priority, assignee, blocked, overdue, tag } => {
-                commands::task::list(epic, status.as_deref(), priority.as_deref(), assignee, blocked, overdue, tag.as_deref(), &cli.format, cli.quiet)
+            TaskCommands::List { epic, status, priority, assignee, blocked, overdue, tag, all } => {
+                commands::task::list(epic, status.as_deref(), priority.as_deref(), assignee, blocked, overdue, tag.as_deref(), all, &cli.format, cli.quiet)
             }
             TaskCommands::Batch { file } => {
                 commands::task::batch(&file, &cli.format, cli.quiet)
@@ -110,7 +110,7 @@ fn main() {
         },
         
         Commands::List(args) => {
-            commands::list::execute(args.epic, args.status.as_deref(), args.priority.as_deref(), args.assignee, args.blocked, args.overdue, args.tag.as_deref(), &cli.format, cli.quiet)
+            commands::list::execute(args.epic, args.status.as_deref(), args.priority.as_deref(), args.assignee, args.blocked, args.overdue, args.tag.as_deref(), args.all, &cli.format, cli.quiet)
         }
         
         Commands::Summary => {

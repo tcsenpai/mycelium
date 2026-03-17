@@ -13,9 +13,10 @@ pub fn execute(
     blocked: bool,
     overdue: bool,
     tag: Option<&str>,
+    all: bool,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
     // This is just a convenience wrapper around task list
-    super::task::list(epic_id, status, priority, assignee_id, blocked, overdue, tag, format, quiet)
+    super::task::list(epic_id, status, priority, assignee_id, blocked, overdue, tag, all, format, quiet)
 }

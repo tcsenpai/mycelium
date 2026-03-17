@@ -1,12 +1,13 @@
 use chrono::{NaiveDate, Local, Duration};
 use colored::Colorize;
 use comfy_table::{Table, ContentArrangement};
-use crate::commands::{ensure_initialized, SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX, WARNING_PREFIX};
+use crate::commands::{ensure_initialized, SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX};
 use crate::cli::OutputFormat;
-use crate::models::{Priority, Status};
+use crate::models::{Priority, Status, Epic};
 use crate::models::external_ref::parse_github_ref;
 use crate::error::Result;
 use std::fs;
+use std::collections::{HashMap, HashSet};
 
 pub fn create(
     title: &str,
@@ -62,12 +63,19 @@ pub fn list(
     blocked: bool,
     overdue: bool,
     tag: Option<&str>,
+    all: bool,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
     let db = ensure_initialized()?;
     
-    let status_enum: Option<Status> = status.map(|s| s.parse()).transpose()?;
+    // Default to 'open' status unless --all is specified or a specific status is given
+    let status_enum: Option<Status> = if all {
+        None
+    } else {
+        status.map(|s| s.parse()).transpose()?.or(Some(Status::Open))
+    };
+    
     let priority_enum: Option<Priority> = priority.map(|p| p.parse()).transpose()?;
     
     let tasks = db.list_tasks(epic_id, status_enum, priority_enum, assignee_id, blocked, overdue, tag)?;
@@ -83,40 +91,298 @@ pub fn list(
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&tasks)?),
         OutputFormat::Table => {
             if tasks.is_empty() {
-                println!("{} No tasks found.", INFO_PREFIX.blue());
+                let status_msg = if all {
+                    "No tasks found."
+                } else {
+                    "No open tasks found. Use --all to see all tasks."
+                };
+                println!("{} {}", INFO_PREFIX.blue(), status_msg);
                 return Ok(());
             }
             
-            let mut table = Table::new();
-            table.set_content_arrangement(ContentArrangement::Dynamic);
-            table.set_header(vec!["ID", "Title", "Status", "Priority", "Epic", "Due", "Tags"]);
+            // Fetch all epics for lookup
+            let epics = db.list_epics()?;
+            let epic_map: HashMap<i64, Epic> = epics.into_iter().map(|e| (e.id, e)).collect();
             
-            let task_count = tasks.len();
-            for task in tasks {
-                let epic = task.epic_id.map(|id| format!("#{}", id));
-                let due = task.due_date.map(|d| d.to_string()).unwrap_or_else(|| "-".to_string());
-                let due_str = if task.is_overdue() {
-                    due.red().to_string()
-                } else {
-                    due
-                };
-                let tags = task.tags.unwrap_or_else(|| "-".to_string());
-                
-                table.add_row(vec![
-                    task.id.to_string(),
-                    task.title.clone(),
-                    format!("{} {}", task.status.emoji(), task.status),
-                    format!("{} {}", task.priority.emoji(), task.priority),
-                    epic.unwrap_or_else(|| "-".to_string()),
-                    due_str,
-                    tags,
-                ]);
+            // Fetch all dependencies for the tasks we're showing
+            let task_ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
+            let deps = db.get_dependencies_for_tasks(&task_ids)?;
+            
+            // Check if any tasks have dependencies
+            let has_dependencies = deps.iter().any(|(_, (blocked_by, blocks))| 
+                !blocked_by.is_empty() || !blocks.is_empty()
+            );
+            
+            if has_dependencies {
+                // Tree view
+                print_tree_view(&tasks, &epic_map, &deps, &db)?;
+            } else {
+                // Grouped list view
+                print_grouped_view(&tasks, &epic_map)?;
             }
-            
-            println!("{}", table);
-            println!("\nShowing {} task(s)", task_count);
         }
     }
+    Ok(())
+}
+
+/// Print tasks in a tree view when dependencies exist
+fn print_tree_view(
+    tasks: &[crate::models::Task],
+    epic_map: &HashMap<i64, Epic>,
+    deps: &HashMap<i64, (Vec<i64>, Vec<i64>)>,
+    db: &crate::db::Database,
+) -> Result<()> {
+    use std::collections::HashSet;
+    
+    // Get task lookup
+    let task_map: HashMap<i64, &crate::models::Task> = tasks.iter().map(|t| (t.id, t)).collect();
+    
+    // Find root tasks (those not blocked by other tasks in the filtered list)
+    let task_ids: HashSet<i64> = tasks.iter().map(|t| t.id).collect();
+    let mut roots: Vec<i64> = Vec::new();
+    let mut visited: HashSet<i64> = HashSet::new();
+    
+    for task in tasks {
+        if let Some((blocked_by, _)) = deps.get(&task.id) {
+            // Task is a root if none of its blockers are in the filtered list
+            let has_filtered_blocker = blocked_by.iter().any(|id| task_ids.contains(id));
+            if !has_filtered_blocker {
+                roots.push(task.id);
+            }
+        } else {
+            roots.push(task.id);
+        }
+    }
+    
+    // If no roots found (e.g., circular dependency in filtered list), show all
+    if roots.is_empty() {
+        roots = tasks.iter().map(|t| t.id).collect();
+    }
+    
+    // Print epics section first
+    let mut epic_tasks: HashMap<Option<i64>, Vec<i64>> = HashMap::new();
+    for task in tasks {
+        epic_tasks.entry(task.epic_id).or_default().push(task.id);
+    }
+    
+    println!("\n{}", "📋 Tasks (Tree View)".bold().underline());
+    
+    let mut total_shown = 0;
+    
+    // Sort roots by epic, then priority
+    let mut sorted_roots = roots.clone();
+    sorted_roots.sort_by_key(|id| {
+        task_map.get(id).map(|t| {
+            let epic_sort = t.epic_id.unwrap_or(0);
+            let priority_sort = match t.priority {
+                crate::models::Priority::Critical => 1,
+                crate::models::Priority::High => 2,
+                crate::models::Priority::Medium => 3,
+                crate::models::Priority::Low => 4,
+            };
+            (epic_sort, priority_sort)
+        }).unwrap_or((0, 5))
+    });
+    
+    // Print each root and its tree
+    for (i, root_id) in sorted_roots.iter().enumerate() {
+        let is_last = i == sorted_roots.len() - 1;
+        print_task_tree(*root_id, &task_map, deps, &task_ids, "", is_last, &mut visited, &mut total_shown)?;
+    }
+    
+    println!("\n{} {} task(s) shown", INFO_PREFIX.blue(), total_shown);
+    
+    Ok(())
+}
+
+/// Recursively print task tree
+fn print_task_tree(
+    task_id: i64,
+    task_map: &HashMap<i64, &crate::models::Task>,
+    deps: &HashMap<i64, (Vec<i64>, Vec<i64>)>,
+    filtered_ids: &HashSet<i64>,
+    prefix: &str,
+    is_last: bool,
+    visited: &mut std::collections::HashSet<i64>,
+    total_shown: &mut usize,
+) -> Result<()> {
+    if !filtered_ids.contains(&task_id) {
+        return Ok(());
+    }
+    
+    if visited.contains(&task_id) {
+        // Circular reference - show reference only
+        if let Some(task) = task_map.get(&task_id) {
+            let connector = if is_last { "└── " } else { "├── " };
+            println!("{}{}#{}: {} (circular)", prefix, connector, task_id, task.title.dimmed());
+        }
+        return Ok(());
+    }
+    
+    visited.insert(task_id);
+    *total_shown += 1;
+    
+    if let Some(task) = task_map.get(&task_id) {
+        let connector = if prefix.is_empty() { "" } else if is_last { "└── " } else { "├── " };
+        let status_icon = if task.status == Status::Open { "○".normal() } else { "✓".green() };
+        let priority_str = format!("{}", task.priority.emoji());
+        
+        let epic_str = task.epic_id.map(|id| format!(" [E#{}]", id)).unwrap_or_default();
+        
+        let overdue_str = if task.is_overdue() {
+            " [OVERDUE]".red().bold().to_string()
+        } else {
+            String::new()
+        };
+        
+        let blocked_str = if let Some((blocked_by, _)) = deps.get(&task_id) {
+            let open_blockers: Vec<_> = blocked_by.iter()
+                .filter(|id| task_map.get(*id).map(|t| t.status == Status::Open).unwrap_or(false))
+                .collect();
+            if !open_blockers.is_empty() {
+                format!(" [blocked by {}]", open_blockers.iter().map(|id| format!("#{}", id)).collect::<Vec<_>>().join(", ")).yellow().to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        
+        println!("{}{}{} {} {}{}{}{}", 
+            prefix, 
+            connector,
+            status_icon,
+            priority_str,
+            task.title.bold(),
+            epic_str.dimmed(),
+            overdue_str,
+            blocked_str
+        );
+        
+        // Print children (tasks blocked by this one)
+        if let Some((_, blocks)) = deps.get(&task_id) {
+            let children: Vec<_> = blocks.iter()
+                .filter(|id| filtered_ids.contains(id))
+                .copied()
+                .collect();
+            
+            let child_prefix = if prefix.is_empty() {
+                if is_last { "    ".to_string() } else { "│   ".to_string() }
+            } else {
+                format!("{}{}", prefix, if is_last { "    " } else { "│   " })
+            };
+            
+            for (i, child_id) in children.iter().enumerate() {
+                let child_last = i == children.len() - 1;
+                print_task_tree(*child_id, task_map, deps, filtered_ids, &child_prefix, child_last, visited, total_shown)?;
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Print tasks grouped by epic
+fn print_grouped_view(
+    tasks: &[crate::models::Task],
+    epic_map: &HashMap<i64, Epic>,
+) -> Result<()> {
+    // Group tasks by epic
+    let mut epic_tasks: HashMap<Option<i64>, Vec<&crate::models::Task>> = HashMap::new();
+    for task in tasks {
+        epic_tasks.entry(task.epic_id).or_default().push(task);
+    }
+    
+    // Sort epics: epics with tasks first, then by epic id
+    let mut epic_order: Vec<Option<i64>> = epic_tasks.keys().copied().collect();
+    epic_order.sort_by_key(|e| {
+        match e {
+            Some(id) => (0, *id),
+            None => (1, 0), // No epic goes last
+        }
+    });
+    
+    let mut total_shown = 0;
+    
+    for epic_id in epic_order {
+        let tasks_in_epic = epic_tasks.get(&epic_id).unwrap();
+        
+        // Print epic header
+        match epic_id {
+            Some(id) => {
+                if let Some(epic) = epic_map.get(&id) {
+                    let status_icon = if epic.status == Status::Open { "📂" } else { "📁" };
+                    println!("\n{} {} {} {}", 
+                        status_icon,
+                        format!("E#{}:", id).cyan().bold(),
+                        epic.title.bold(),
+                        format!("({} tasks)", tasks_in_epic.len()).dimmed()
+                    );
+                } else {
+                    println!("\n{} {} {}", 
+                        "📂".cyan(),
+                        format!("E#{}:", id).cyan().bold(),
+                        format!("(Unknown epic, {} tasks)", tasks_in_epic.len()).dimmed()
+                    );
+                }
+            }
+            None => {
+                println!("\n{} {}", 
+                    "📂 No Epic:".cyan().bold(),
+                    format!("({} tasks)", tasks_in_epic.len()).dimmed()
+                );
+            }
+        }
+        
+        // Create table for tasks in this epic
+        let mut table = Table::new();
+        table.set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header(vec!["ID", "Title", "Status", "Priority", "Due", "Tags"]);
+        
+        // Sort tasks by priority, then creation date
+        let mut sorted_tasks = tasks_in_epic.clone();
+        sorted_tasks.sort_by(|a, b| {
+            let priority_ord = format!("{:?}", a.priority).cmp(&format!("{:?}", b.priority));
+            if priority_ord != std::cmp::Ordering::Equal {
+                priority_ord
+            } else {
+                b.created_at.cmp(&a.created_at)
+            }
+        });
+        
+        for task in sorted_tasks {
+            let due = task.due_date.map(|d| d.to_string()).unwrap_or_else(|| "-".to_string());
+            let due_str = if task.is_overdue() {
+                due.red().to_string()
+            } else {
+                due
+            };
+            let tags = task.tags.as_ref().map(|t| {
+                if t.len() > 15 { format!("{}...", &t[..15]) } else { t.clone() }
+            }).unwrap_or_else(|| "-".to_string());
+            
+            table.add_row(vec![
+                format!("#{}", task.id).dimmed().to_string(),
+                task.title.clone(),
+                format!("{} {}", task.status.emoji(), task.status),
+                format!("{} {}", task.priority.emoji(), task.priority),
+                due_str,
+                tags,
+            ]);
+            total_shown += 1;
+        }
+        
+        println!("{}", table);
+    }
+    
+    let status_filter_msg = if tasks.iter().all(|t| t.status == Status::Open) {
+        " (open tasks only, use --all for all)"
+    } else {
+        ""
+    };
+    
+    println!("\n{} {} task(s) shown{}", INFO_PREFIX.blue(), total_shown, status_filter_msg.dimmed());
+    
     Ok(())
 }
 

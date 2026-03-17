@@ -152,7 +152,7 @@ pub enum TaskCommands {
         #[arg(short, long)]
         epic: Option<i64>,
         
-        /// Filter by status
+        /// Filter by status (defaults to 'open')
         #[arg(short, long)]
         status: Option<String>,
         
@@ -175,6 +175,10 @@ pub enum TaskCommands {
         /// Filter by tag
         #[arg(short, long)]
         tag: Option<String>,
+        
+        /// Show all tasks including closed (overrides default open filter)
+        #[arg(long)]
+        all: bool,
     },
     
     /// Batch create tasks from JSON file
@@ -378,7 +382,7 @@ pub struct ListArgs {
     #[arg(short, long)]
     pub epic: Option<i64>,
     
-    /// Filter by status
+    /// Filter by status (defaults to 'open')
     #[arg(short, long)]
     pub status: Option<String>,
     
@@ -401,6 +405,10 @@ pub struct ListArgs {
     /// Filter by tag
     #[arg(short, long)]
     pub tag: Option<String>,
+    
+    /// Show all tasks including closed (overrides default open filter)
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(Subcommand)]

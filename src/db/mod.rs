@@ -551,6 +551,58 @@ impl Database {
         Ok(open_blockers)
     }
 
+    /// Get dependencies for multiple tasks at once
+    /// Returns a map of task_id -> (blocked_by_ids, blocks_ids)
+    pub fn get_dependencies_for_tasks(&self, task_ids: &[i64]) -> Result<std::collections::HashMap<i64, (Vec<i64>, Vec<i64>)>> {
+        use std::collections::HashMap;
+        
+        if task_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        
+        let placeholders = task_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        
+        // Get all blocking relationships for these tasks
+        let sql = format!(
+            "SELECT task_id, depends_on_task_id FROM dependencies 
+             WHERE task_id IN ({}) OR depends_on_task_id IN ({})",
+            placeholders, placeholders
+        );
+        
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = task_ids.iter()
+            .chain(task_ids.iter())
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+        
+        let mut result: HashMap<i64, (Vec<i64>, Vec<i64>)> = HashMap::new();
+        
+        // Initialize empty entries for all task IDs
+        for &id in task_ids {
+            result.insert(id, (vec![], vec![]));
+        }
+        
+        let rows = stmt.query_map(&*params, |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        
+        for row in rows {
+            let (task_id, depends_on_id) = row?;
+            
+            // task_id is blocked by depends_on_id
+            if task_ids.contains(&task_id) {
+                result.entry(task_id).or_default().0.push(depends_on_id);
+            }
+            
+            // depends_on_id blocks task_id
+            if task_ids.contains(&depends_on_id) {
+                result.entry(depends_on_id).or_default().1.push(task_id);
+            }
+        }
+        
+        Ok(result)
+    }
+
     // External reference operations
     pub fn add_external_ref(&mut self, task_id: i64, ref_type: ExternalRefType, reference: &str) -> Result<ExternalRef> {
         self.conn.execute(
