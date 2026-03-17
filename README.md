@@ -15,6 +15,10 @@ A robust, production-grade task/plan manager CLI designed for reliability, agent
 - **🤖 Agent-Optimized**: One-shot CLI with JSON output support
 - **⚡ Fast**: Sub-100ms response time for typical operations
 - **🛡️ Safe**: Comprehensive error handling and validation
+- **📋 Smart List View**: Tree visualization for dependencies, epic grouping for simple lists
+- **📝 Task Notes**: Add comments and notes to tasks
+- **📎 Task Cloning**: Duplicate tasks with all metadata
+- **📦 Batch Operations**: Close, tag, or move multiple tasks at once
 
 ## Installation
 
@@ -88,6 +92,18 @@ myc deps show 2
 myc task close 1
 myc task close 2
 
+# Batch operations
+myc task batch-op close 3 4 5              # Close multiple tasks
+myc task batch-op tag urgent 1 2 3         # Tag multiple tasks
+myc task batch-op move 2 6 7 8             # Move tasks to epic #2
+
+# Task notes
+myc task note 1 "Found edge case with auth"
+myc task notes 1                           # View notes
+
+# Clone a task
+myc task clone 1 --title "API Design v2"
+
 # View project summary
 myc summary
 ```
@@ -121,13 +137,16 @@ myc task create --title "..." [options]
   --assignee <id>           # Assign to person
   --due <YYYY-MM-DD>        # Set due date
 
-myc task list [filters]
+myc list [filters]          # List tasks and epics (shows tree view if dependencies exist)
   --epic <id>               # Filter by epic
-  --status <open|closed>    # Filter by status
+  --status <open|closed>    # Filter by status (defaults to 'open')
   --priority <level>        # Filter by priority
   --assignee <id>           # Filter by assignee
   --blocked                 # Show only blocked tasks
   --overdue                 # Show only overdue tasks
+  --all                     # Show all tasks including closed
+
+myc task list [filters]     # Same as myc list, but task-specific
 
 myc task show <id>          # Show task details
 myc task update <id> [options]
@@ -135,6 +154,32 @@ myc task close <id> [--force]   # Close (blocked tasks need --force)
 myc task reopen <id>
 myc task delete <id> [--force]
 myc task assign <task_id> <assignee_id|0>
+
+### Batch Operations
+
+```bash
+# Close multiple tasks at once
+myc task batch-op close <id> [<id>...] [--force]
+
+# Add a tag to multiple tasks
+myc task batch-op tag <tag> <id> [<id>...]
+
+# Move multiple tasks to an epic (use 0 for no epic)
+myc task batch-op move <epic_id> <id> [<id>...]
+```
+
+### Task Notes
+
+```bash
+myc task note <task_id> "Note content"    # Add a note to a task
+myc task notes <task_id>                  # Show all notes for a task
+```
+
+### Task Cloning
+
+```bash
+myc task clone <id> [--title "New Title"]  # Clone a task (copies description, priority, etc.)
+```
 ```
 
 ### Dependencies
