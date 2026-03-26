@@ -15,7 +15,7 @@ fn main() {
     let cli = Cli::parse();
     
     let result = match cli.command {
-        Commands::Init => commands::init::execute(),
+        Commands::Init { force_agents } => commands::init::execute(force_agents),
         
         Commands::Epic(cmd) => match cmd {
             EpicCommands::Create { title, description } => {

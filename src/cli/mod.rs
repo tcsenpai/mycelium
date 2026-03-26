@@ -22,7 +22,11 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Initialize a new mycelium project
-    Init,
+    Init {
+        /// Force regeneration of AGENTS.md even if it already exists
+        #[arg(long)]
+        force_agents: bool,
+    },
     
     /// Manage epics
     #[command(subcommand)]
