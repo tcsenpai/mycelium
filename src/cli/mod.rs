@@ -60,6 +60,39 @@ pub enum Commands {
         #[arg(long)]
         fix: bool,
     },
+
+    /// Linear integration (bidirectional sync)
+    #[command(subcommand)]
+    Linear(LinearCommands),
+}
+
+#[derive(Subcommand)]
+pub enum LinearCommands {
+    /// Set up Linear integration (API key, team, mappings)
+    Setup,
+
+    /// Bidirectional sync with Linear
+    Sync {
+        /// Force local changes to win on conflicts
+        #[arg(long)]
+        force_local: bool,
+
+        /// Force remote changes to win on conflicts
+        #[arg(long)]
+        force_remote: bool,
+    },
+
+    /// Push local tasks to Linear
+    Push,
+
+    /// Pull Linear issues to local
+    Pull,
+
+    /// Show Linear integration status
+    Status,
+
+    /// Remove Linear integration and sync data
+    Unlink,
 }
 
 #[derive(Subcommand)]
@@ -336,9 +369,16 @@ pub enum BatchOpCommands {
     Move {
         /// Epic ID (use 0 for no epic)
         epic_id: i64,
-        
+
         /// Task IDs
         ids: Vec<i64>,
+    },
+
+    /// Delete tasks that are not assigned to any epic
+    DeleteOrphans {
+        /// Force deletion without confirmation
+        #[arg(long)]
+        force: bool,
     },
 }
 

@@ -901,6 +901,182 @@ impl Database {
             blocked_tasks,
         })
     }
+
+    // Linear sync operations
+    pub fn create_linear_sync(
+        &mut self,
+        local_task_id: i64,
+        linear_issue_id: &str,
+        linear_issue_identifier: Option<&str>,
+        last_local_hash: &str,
+        last_remote_hash: &str,
+    ) -> Result<()> {
+        let now = chrono::Local::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO linear_sync (local_task_id, linear_issue_id, linear_issue_identifier, last_synced_at, last_local_hash, last_remote_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (local_task_id, linear_issue_id, linear_issue_identifier, &now, last_local_hash, last_remote_hash),
+        )?;
+        Ok(())
+    }
+
+    pub fn get_linear_sync_by_task(&self, task_id: i64) -> Result<Option<LinearSyncEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, local_task_id, linear_issue_id, linear_issue_identifier, last_synced_at, last_local_hash, last_remote_hash, sync_direction
+             FROM linear_sync WHERE local_task_id = ?1"
+        )?;
+        let entry = stmt.query_row([task_id], |row| {
+            Ok(LinearSyncEntry {
+                id: row.get(0)?,
+                local_task_id: row.get(1)?,
+                linear_issue_id: row.get(2)?,
+                linear_issue_identifier: row.get(3)?,
+                last_synced_at: row.get(4)?,
+                last_local_hash: row.get(5)?,
+                last_remote_hash: row.get(6)?,
+                sync_direction: row.get(7)?,
+            })
+        });
+        match entry {
+            Ok(e) => Ok(Some(e)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn get_linear_sync_by_issue(&self, linear_issue_id: &str) -> Result<Option<LinearSyncEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, local_task_id, linear_issue_id, linear_issue_identifier, last_synced_at, last_local_hash, last_remote_hash, sync_direction
+             FROM linear_sync WHERE linear_issue_id = ?1"
+        )?;
+        let entry = stmt.query_row([linear_issue_id], |row| {
+            Ok(LinearSyncEntry {
+                id: row.get(0)?,
+                local_task_id: row.get(1)?,
+                linear_issue_id: row.get(2)?,
+                linear_issue_identifier: row.get(3)?,
+                last_synced_at: row.get(4)?,
+                last_local_hash: row.get(5)?,
+                last_remote_hash: row.get(6)?,
+                sync_direction: row.get(7)?,
+            })
+        });
+        match entry {
+            Ok(e) => Ok(Some(e)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn update_linear_sync(
+        &mut self,
+        local_task_id: i64,
+        last_local_hash: &str,
+        last_remote_hash: &str,
+    ) -> Result<()> {
+        let now = chrono::Local::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE linear_sync SET last_synced_at = ?1, last_local_hash = ?2, last_remote_hash = ?3 WHERE local_task_id = ?4",
+            (&now, last_local_hash, last_remote_hash, local_task_id),
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_all_linear_sync(&mut self) -> Result<()> {
+        self.conn.execute("DELETE FROM linear_sync", [])?;
+        Ok(())
+    }
+
+    pub fn count_linear_synced(&self) -> Result<i64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM linear_sync", [], |row| row.get(0)
+        )?;
+        Ok(count)
+    }
+
+    pub fn get_last_sync_time(&self) -> Result<Option<String>> {
+        let result: std::result::Result<String, rusqlite::Error> = self.conn.query_row(
+            "SELECT MAX(last_synced_at) FROM linear_sync", [], |row| row.get(0)
+        );
+        match result {
+            Ok(t) => Ok(Some(t)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(rusqlite::Error::InvalidColumnType(_, _, _)) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// List all tasks (no filtering). Used by sync.
+    pub fn list_all_tasks(&self) -> Result<Vec<Task>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at
+             FROM tasks ORDER BY id"
+        )?;
+        let tasks = stmt.query_map([], |row| {
+            let due_date: Option<String> = row.get(7)?;
+            Ok(Task {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                status: row.get::<_, String>(3)?.parse().unwrap(),
+                priority: row.get::<_, String>(4)?.parse().unwrap(),
+                epic_id: row.get(5)?,
+                assignee_id: row.get(6)?,
+                due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+                tags: row.get(8)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
+                    .unwrap().with_timezone(&chrono::Local),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?)
+                    .unwrap().with_timezone(&chrono::Local),
+            })
+        })?;
+        tasks.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// List tasks that have no epic assigned.
+    pub fn list_orphan_tasks(&self) -> Result<Vec<Task>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at
+             FROM tasks WHERE epic_id IS NULL ORDER BY id"
+        )?;
+        let tasks = stmt.query_map([], |row| {
+            let due_date: Option<String> = row.get(7)?;
+            Ok(Task {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                status: row.get::<_, String>(3)?.parse().unwrap(),
+                priority: row.get::<_, String>(4)?.parse().unwrap(),
+                epic_id: row.get(5)?,
+                assignee_id: row.get(6)?,
+                due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+                tags: row.get(8)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
+                    .unwrap().with_timezone(&chrono::Local),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?)
+                    .unwrap().with_timezone(&chrono::Local),
+            })
+        })?;
+        tasks.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// Delete all tasks that have no epic assigned. Returns count deleted.
+    pub fn delete_orphan_tasks(&mut self) -> Result<usize> {
+        let count = self.conn.execute("DELETE FROM tasks WHERE epic_id IS NULL", [])?;
+        Ok(count)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LinearSyncEntry {
+    pub id: i64,
+    pub local_task_id: i64,
+    pub linear_issue_id: String,
+    pub linear_issue_identifier: Option<String>,
+    pub last_synced_at: String,
+    pub last_local_hash: String,
+    pub last_remote_hash: String,
+    pub sync_direction: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

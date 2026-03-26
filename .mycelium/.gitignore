@@ -4,3 +4,5 @@
 *.db-shm
 # Temporary files
 *.tmp
+# Linear config (contains API key)
+.linear/

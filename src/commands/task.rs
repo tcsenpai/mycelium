@@ -1,7 +1,7 @@
 use chrono::{NaiveDate, Local, Duration};
 use colored::Colorize;
 use comfy_table::{Table, ContentArrangement};
-use crate::commands::{ensure_initialized, SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX};
+use crate::commands::{ensure_initialized, confirm, SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX, WARNING_PREFIX};
 use crate::cli::OutputFormat;
 use crate::models::{Priority, Status, Epic};
 use crate::models::external_ref::parse_github_ref;
@@ -1040,6 +1040,41 @@ pub fn batch_move(epic_id: i64, task_ids: &[i64], quiet: bool) -> Result<()> {
             println!("  - #{}: {}", task.id, task.title);
         }
     }
-    
+
+    Ok(())
+}
+
+pub fn batch_delete_orphans(force: bool, quiet: bool) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    let orphans = db.list_orphan_tasks()?;
+
+    if orphans.is_empty() {
+        if !quiet {
+            println!("{} No tasks without an epic found.", INFO_PREFIX);
+        }
+        return Ok(());
+    }
+
+    if !quiet {
+        println!("{} Found {} task(s) not assigned to any epic:", WARNING_PREFIX.yellow(), orphans.len());
+        for task in &orphans {
+            println!("  - #{}: {} [{}]", task.id, task.title, task.status);
+        }
+    }
+
+    if !force {
+        if !confirm(&format!("Delete all {} orphan task(s)?", orphans.len())) {
+            if !quiet {
+                println!("  Cancelled.");
+            }
+            return Ok(());
+        }
+    }
+
+    let count = db.delete_orphan_tasks()?;
+    if !quiet {
+        println!("{} Deleted {} task(s) without an epic.", SUCCESS_PREFIX.green(), count);
+    }
+
     Ok(())
 }

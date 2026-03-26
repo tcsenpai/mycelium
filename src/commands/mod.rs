@@ -12,6 +12,7 @@ pub mod list;
 pub mod summary;
 pub mod export;
 pub mod doctor;
+pub mod linear;
 
 pub const ERROR_PREFIX: &str = "❌";
 pub const SUCCESS_PREFIX: &str = "✅";

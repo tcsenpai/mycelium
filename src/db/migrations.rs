@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use crate::error::Result;
 
-const CURRENT_VERSION: i32 = 3;
+const CURRENT_VERSION: i32 = 4;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     create_migrations_table(conn)?;
@@ -22,7 +22,12 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         migrate_v3(conn)?;
         set_version(conn, 3)?;
     }
-    
+
+    if version < 4 {
+        migrate_v4(conn)?;
+        set_version(conn, 4)?;
+    }
+
     Ok(())
 }
 
@@ -210,6 +215,33 @@ fn migrate_v3(conn: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_task_notes_task ON task_notes(task_id)",
         [],
     )?;
-    
+
+    Ok(())
+}
+
+fn migrate_v4(conn: &Connection) -> Result<()> {
+    // Linear sync mapping table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS linear_sync (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            local_task_id INTEGER NOT NULL,
+            linear_issue_id TEXT NOT NULL,
+            linear_issue_identifier TEXT,
+            last_synced_at TEXT NOT NULL,
+            last_local_hash TEXT NOT NULL,
+            last_remote_hash TEXT NOT NULL,
+            sync_direction TEXT NOT NULL DEFAULT 'both',
+            FOREIGN KEY (local_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            UNIQUE(local_task_id),
+            UNIQUE(linear_issue_id)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_linear_sync_issue ON linear_sync(linear_issue_id)",
+        [],
+    )?;
+
     Ok(())
 }

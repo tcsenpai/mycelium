@@ -44,6 +44,18 @@ pub enum MyceliumError {
 
     #[error("Export error: {0}")]
     Export(String),
+
+    #[error("Linear API error: {0}")]
+    LinearApi(String),
+
+    #[error("Linear config error: {0}")]
+    LinearConfig(String),
+
+    #[error("Linear sync conflict on task {task_id}: {message}")]
+    LinearSyncConflict { task_id: i64, message: String },
+
+    #[error("HTTP error: {0}")]
+    Http(String),
 }
 
 pub type Result<T> = std::result::Result<T, MyceliumError>;

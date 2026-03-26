@@ -4,9 +4,10 @@ mod cli;
 mod commands;
 mod db;
 mod error;
+mod linear;
 mod models;
 
-use cli::{Cli, Commands, EpicCommands, TaskCommands, AssigneeCommands, DepsCommands, ExportCommands, LinkCommands, BatchOpCommands};
+use cli::{Cli, Commands, EpicCommands, TaskCommands, AssigneeCommands, DepsCommands, ExportCommands, LinkCommands, BatchOpCommands, LinearCommands};
 use error::handle_error;
 
 pub use commands::{ERROR_PREFIX, SUCCESS_PREFIX, INFO_PREFIX, WARNING_PREFIX};
@@ -102,6 +103,9 @@ fn main() {
                 BatchOpCommands::Move { epic_id, ids } => {
                     commands::task::batch_move(epic_id, &ids, cli.quiet)
                 }
+                BatchOpCommands::DeleteOrphans { force } => {
+                    commands::task::batch_delete_orphans(force, cli.quiet)
+                }
             }
         },
         
@@ -148,6 +152,27 @@ fn main() {
         
         Commands::Doctor { fix } => {
             commands::doctor::execute(fix, cli.quiet)
+        }
+
+        Commands::Linear(cmd) => match cmd {
+            LinearCommands::Setup => {
+                commands::linear::setup(cli.quiet)
+            }
+            LinearCommands::Sync { force_local, force_remote } => {
+                commands::linear::sync_cmd(force_local, force_remote, cli.quiet)
+            }
+            LinearCommands::Push => {
+                commands::linear::push_cmd(cli.quiet)
+            }
+            LinearCommands::Pull => {
+                commands::linear::pull_cmd(cli.quiet)
+            }
+            LinearCommands::Status => {
+                commands::linear::status_cmd(&cli.format, cli.quiet)
+            }
+            LinearCommands::Unlink => {
+                commands::linear::unlink_cmd(cli.quiet)
+            }
         }
     };
     
