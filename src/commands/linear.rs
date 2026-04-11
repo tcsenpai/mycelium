@@ -313,8 +313,15 @@ pub fn sync_cmd(force_local: bool, force_remote: bool, quiet: bool) -> Result<()
     let mut db = ensure_initialized()?;
     let client = LinearClient::new(&config.api_key);
 
-    let resolution = if force_local {
+    let resolution = if force_local && force_remote {
+        if !quiet {
+            println!("{} Cannot use both --force-local and --force-remote. Defaulting to remote wins.", WARNING_PREFIX);
+        }
+        ConflictResolution::RemoteWins
+    } else if force_local {
         ConflictResolution::LocalWins
+    } else if force_remote {
+        ConflictResolution::RemoteWins
     } else {
         ConflictResolution::RemoteWins
     };
