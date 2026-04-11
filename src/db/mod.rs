@@ -6,6 +6,36 @@ use crate::models::*;
 
 mod migrations;
 
+/// Parse a status string from the database, returning a rusqlite error on failure.
+fn parse_status(s: &str) -> std::result::Result<Status, rusqlite::Error> {
+    s.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+        0, rusqlite::types::Type::Text, Box::new(e),
+    ))
+}
+
+/// Parse a priority string from the database, returning a rusqlite error on failure.
+fn parse_priority(s: &str) -> std::result::Result<Priority, rusqlite::Error> {
+    s.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+        0, rusqlite::types::Type::Text, Box::new(e),
+    ))
+}
+
+/// Parse an RFC3339 timestamp from the database into a local DateTime.
+fn parse_timestamp(s: &str) -> std::result::Result<chrono::DateTime<chrono::Local>, rusqlite::Error> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&chrono::Local))
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+            0, rusqlite::types::Type::Text, Box::new(e),
+        ))
+}
+
+/// Parse an ExternalRefType string from the database.
+fn parse_ref_type(s: &str) -> std::result::Result<ExternalRefType, rusqlite::Error> {
+    s.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+        0, rusqlite::types::Type::Text, Box::new(e),
+    ))
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -50,12 +80,12 @@ impl Database {
     }
 
     // Epic operations
-    pub fn create_epic(&mut self, title: &str, description: Option<&str>) -> Result<Epic> {
+    pub fn create_epic(&mut self, title: &str, description: Option<&str>, notes: Option<&str>, user_info: Option<&str>) -> Result<Epic> {
         let now = chrono::Local::now().to_rfc3339();
         self.conn.execute(
-            "INSERT INTO epics (title, description, status, created_at, updated_at) 
-             VALUES (?1, ?2, 'open', ?3, ?3)",
-            (title, description, now),
+            "INSERT INTO epics (title, description, status, notes, user_info, created_at, updated_at)
+             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?5)",
+            (title, description, notes, user_info, now),
         )?;
         let id = self.conn.last_insert_rowid();
         self.get_epic(id)
@@ -67,19 +97,20 @@ impl Database {
 
     pub fn get_epic(&self, id: i64) -> Result<Option<Epic>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, created_at, updated_at FROM epics WHERE id = ?1"
+            "SELECT id, title, description, status, notes, user_info, agent_questions, created_at, updated_at FROM epics WHERE id = ?1"
         )?;
-        
+
         let epic = stmt.query_row([id], |row| {
             Ok(Epic {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
-                status: row.get::<_, String>(3)?.parse().unwrap(),
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                    .unwrap().with_timezone(&chrono::Local),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                status: parse_status(&row.get::<_, String>(3)?)?,
+                notes: row.get(4)?,
+                user_info: row.get(5)?,
+                agent_questions: row.get(6)?,
+                created_at: parse_timestamp(&row.get::<_, String>(7)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(8)?)?,
             })
         });
 
@@ -92,19 +123,20 @@ impl Database {
 
     pub fn list_epics(&self) -> Result<Vec<Epic>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, created_at, updated_at FROM epics ORDER BY created_at DESC"
+            "SELECT id, title, description, status, notes, user_info, agent_questions, created_at, updated_at FROM epics ORDER BY created_at DESC"
         )?;
-        
+
         let epics = stmt.query_map([], |row| {
             Ok(Epic {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
-                status: row.get::<_, String>(3)?.parse().unwrap(),
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                    .unwrap().with_timezone(&chrono::Local),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                status: parse_status(&row.get::<_, String>(3)?)?,
+                notes: row.get(4)?,
+                user_info: row.get(5)?,
+                agent_questions: row.get(6)?,
+                created_at: parse_timestamp(&row.get::<_, String>(7)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(8)?)?,
             })
         })?;
 
@@ -113,8 +145,8 @@ impl Database {
 
     pub fn list_epics_with_summary(&self) -> Result<Vec<epic::EpicSummary>> {
         let mut stmt = self.conn.prepare(
-            "SELECT 
-                e.id, e.title, e.description, e.status, e.created_at, e.updated_at,
+            "SELECT
+                e.id, e.title, e.description, e.status, e.notes, e.user_info, e.agent_questions, e.created_at, e.updated_at,
                 COUNT(t.id) as total_tasks,
                 SUM(CASE WHEN t.status = 'open' THEN 1 ELSE 0 END) as open_tasks,
                 SUM(CASE WHEN t.status = 'closed' THEN 1 ELSE 0 END) as closed_tasks
@@ -123,31 +155,41 @@ impl Database {
              GROUP BY e.id
              ORDER BY e.created_at DESC"
         )?;
-        
+
         let summaries = stmt.query_map([], |row| {
             Ok(epic::EpicSummary {
                 epic: Epic {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     description: row.get(2)?,
-                    status: row.get::<_, String>(3)?.parse().unwrap(),
-                    created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                        .unwrap().with_timezone(&chrono::Local),
-                    updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
-                        .unwrap().with_timezone(&chrono::Local),
+                    status: parse_status(&row.get::<_, String>(3)?)?,
+                    notes: row.get(4)?,
+                    user_info: row.get(5)?,
+                    agent_questions: row.get(6)?,
+                    created_at: parse_timestamp(&row.get::<_, String>(7)?)?,
+                    updated_at: parse_timestamp(&row.get::<_, String>(8)?)?,
                 },
-                total_tasks: row.get(6)?,
-                open_tasks: row.get(7)?,
-                closed_tasks: row.get(8)?,
+                total_tasks: row.get(9)?,
+                open_tasks: row.get(10)?,
+                closed_tasks: row.get(11)?,
             })
         })?;
 
         summaries.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
-    pub fn update_epic(&mut self, id: i64, title: Option<&str>, description: Option<&str>, status: Option<Status>) -> Result<Epic> {
+    pub fn update_epic(
+        &mut self,
+        id: i64,
+        title: Option<&str>,
+        description: Option<&str>,
+        status: Option<Status>,
+        notes: Option<Option<&str>>,
+        user_info: Option<Option<&str>>,
+        agent_questions: Option<Option<&str>>,
+    ) -> Result<Epic> {
         let now = chrono::Local::now().to_rfc3339();
-        
+
         if let Some(title) = title {
             self.conn.execute("UPDATE epics SET title = ?1, updated_at = ?2 WHERE id = ?3", (title, &now, id))?;
         }
@@ -156,6 +198,15 @@ impl Database {
         }
         if let Some(status) = status {
             self.conn.execute("UPDATE epics SET status = ?1, updated_at = ?2 WHERE id = ?3", (status.to_string(), &now, id))?;
+        }
+        if let Some(notes) = notes {
+            self.conn.execute("UPDATE epics SET notes = ?1, updated_at = ?2 WHERE id = ?3", (notes, &now, id))?;
+        }
+        if let Some(user_info) = user_info {
+            self.conn.execute("UPDATE epics SET user_info = ?1, updated_at = ?2 WHERE id = ?3", (user_info, &now, id))?;
+        }
+        if let Some(agent_questions) = agent_questions {
+            self.conn.execute("UPDATE epics SET agent_questions = ?1, updated_at = ?2 WHERE id = ?3", (agent_questions, &now, id))?;
         }
         
         self.get_epic(id)
@@ -172,22 +223,24 @@ impl Database {
 
     // Task operations
     pub fn create_task(
-        &mut self, 
-        title: &str, 
+        &mut self,
+        title: &str,
         description: Option<&str>,
         epic_id: Option<i64>,
         priority: Priority,
         assignee_id: Option<i64>,
         due_date: Option<chrono::NaiveDate>,
         tags: Option<&str>,
+        notes: Option<&str>,
+        user_info: Option<&str>,
     ) -> Result<Task> {
         let now = chrono::Local::now().to_rfc3339();
         let due_date_str = due_date.map(|d| d.to_string());
-        
+
         self.conn.execute(
-            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at) 
-             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-            (title, description, priority.to_string(), epic_id, assignee_id, due_date_str, tags, now),
+            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, created_at, updated_at)
+             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+            (title, description, priority.to_string(), epic_id, assignee_id, due_date_str, tags, notes, user_info, now),
         )?;
         
         let id = self.conn.last_insert_rowid();
@@ -200,26 +253,27 @@ impl Database {
 
     pub fn get_task(&self, id: i64) -> Result<Option<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at 
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
              FROM tasks WHERE id = ?1"
         )?;
-        
+
         let task = stmt.query_row([id], |row| {
             let due_date: Option<String> = row.get(7)?;
             Ok(Task {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
-                status: row.get::<_, String>(3)?.parse().unwrap(),
-                priority: row.get::<_, String>(4)?.parse().unwrap(),
+                status: parse_status(&row.get::<_, String>(3)?)?,
+                priority: parse_priority(&row.get::<_, String>(4)?)?,
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
                 due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
                 tags: row.get(8)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
-                    .unwrap().with_timezone(&chrono::Local),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                notes: row.get(9)?,
+                user_info: row.get(10)?,
+                agent_questions: row.get(11)?,
+                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
             })
         });
 
@@ -270,15 +324,15 @@ impl Database {
         }
 
         let sql = format!(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at 
-             FROM tasks 
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+             FROM tasks
              WHERE {}
-             ORDER BY 
-                CASE priority 
-                    WHEN 'critical' THEN 1 
-                    WHEN 'high' THEN 2 
-                    WHEN 'medium' THEN 3 
-                    ELSE 4 
+             ORDER BY
+                CASE priority
+                    WHEN 'critical' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'medium' THEN 3
+                    ELSE 4
                 END,
                 created_at DESC",
             conditions.join(" AND ")
@@ -286,23 +340,24 @@ impl Database {
 
         let mut stmt = self.conn.prepare(&sql)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        
+
         let tasks = stmt.query_map(&*param_refs, |row| {
             let due_date: Option<String> = row.get(7)?;
             Ok(Task {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
-                status: row.get::<_, String>(3)?.parse().unwrap(),
-                priority: row.get::<_, String>(4)?.parse().unwrap(),
+                status: parse_status(&row.get::<_, String>(3)?)?,
+                priority: parse_priority(&row.get::<_, String>(4)?)?,
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
                 due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
                 tags: row.get(8)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
-                    .unwrap().with_timezone(&chrono::Local),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                notes: row.get(9)?,
+                user_info: row.get(10)?,
+                agent_questions: row.get(11)?,
+                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
             })
         })?;
 
@@ -318,9 +373,9 @@ impl Database {
     }
 
     pub fn update_task(
-        &mut self, 
-        id: i64, 
-        title: Option<&str>, 
+        &mut self,
+        id: i64,
+        title: Option<&str>,
         description: Option<&str>,
         status: Option<Status>,
         priority: Option<Priority>,
@@ -328,9 +383,12 @@ impl Database {
         assignee_id: Option<Option<i64>>,
         due_date: Option<Option<chrono::NaiveDate>>,
         tags: Option<Option<&str>>,
+        notes: Option<Option<&str>>,
+        user_info: Option<Option<&str>>,
+        agent_questions: Option<Option<&str>>,
     ) -> Result<Task> {
         let now = chrono::Local::now().to_rfc3339();
-        
+
         if let Some(title) = title {
             self.conn.execute("UPDATE tasks SET title = ?1, updated_at = ?2 WHERE id = ?3", (title, &now, id))?;
         }
@@ -355,6 +413,15 @@ impl Database {
         }
         if let Some(tags) = tags {
             self.conn.execute("UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3", (tags, &now, id))?;
+        }
+        if let Some(notes) = notes {
+            self.conn.execute("UPDATE tasks SET notes = ?1, updated_at = ?2 WHERE id = ?3", (notes, &now, id))?;
+        }
+        if let Some(user_info) = user_info {
+            self.conn.execute("UPDATE tasks SET user_info = ?1, updated_at = ?2 WHERE id = ?3", (user_info, &now, id))?;
+        }
+        if let Some(agent_questions) = agent_questions {
+            self.conn.execute("UPDATE tasks SET agent_questions = ?1, updated_at = ?2 WHERE id = ?3", (agent_questions, &now, id))?;
         }
         
         self.get_task(id)
@@ -396,8 +463,7 @@ impl Database {
                 name: row.get(1)?,
                 email: row.get(2)?,
                 github_username: row.get(3)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                created_at: parse_timestamp(&row.get::<_, String>(4)?)?,
             })
         });
 
@@ -419,8 +485,7 @@ impl Database {
                 name: row.get(1)?,
                 email: row.get(2)?,
                 github_username: row.get(3)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                created_at: parse_timestamp(&row.get::<_, String>(4)?)?,
             })
         })?;
 
@@ -446,8 +511,7 @@ impl Database {
                     name: row.get(1)?,
                     email: row.get(2)?,
                     github_username: row.get(3)?,
-                    created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                        .unwrap().with_timezone(&chrono::Local),
+                    created_at: parse_timestamp(&row.get::<_, String>(4)?)?,
                 },
                 total_tasks: row.get(5)?,
                 open_tasks: row.get(6)?,
@@ -631,8 +695,7 @@ impl Database {
                 id: row.get(0)?,
                 task_id: row.get(1)?,
                 content: row.get(2)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                created_at: parse_timestamp(&row.get::<_, String>(3)?)?,
             })
         });
 
@@ -653,8 +716,7 @@ impl Database {
                 id: row.get(0)?,
                 task_id: row.get(1)?,
                 content: row.get(2)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                created_at: parse_timestamp(&row.get::<_, String>(3)?)?,
             })
         })?;
 
@@ -664,6 +726,60 @@ impl Database {
     pub fn delete_task_note(&mut self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM task_notes WHERE id = ?1", [id])?;
         Ok(())
+    }
+
+    // Epic note operations
+    pub fn add_epic_note(&mut self, epic_id: i64, content: &str) -> Result<EpicNote> {
+        let now = chrono::Local::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO epic_notes (epic_id, content, created_at) VALUES (?1, ?2, ?3)",
+            (epic_id, content, &now),
+        )?;
+
+        let id = self.conn.last_insert_rowid();
+        self.get_epic_note(id)
+            .map(|n| n.ok_or_else(|| MyceliumError::NotFound {
+                entity: "epic_note".to_string(),
+                id: id.to_string()
+            }))?
+    }
+
+    pub fn get_epic_note(&self, id: i64) -> Result<Option<EpicNote>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, epic_id, content, created_at FROM epic_notes WHERE id = ?1"
+        )?;
+
+        let note = stmt.query_row([id], |row| {
+            Ok(EpicNote {
+                id: row.get(0)?,
+                epic_id: row.get(1)?,
+                content: row.get(2)?,
+                created_at: parse_timestamp(&row.get::<_, String>(3)?)?,
+            })
+        });
+
+        match note {
+            Ok(n) => Ok(Some(n)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn list_epic_notes(&self, epic_id: i64) -> Result<Vec<EpicNote>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, epic_id, content, created_at FROM epic_notes WHERE epic_id = ?1 ORDER BY created_at DESC"
+        )?;
+
+        let notes = stmt.query_map([epic_id], |row| {
+            Ok(EpicNote {
+                id: row.get(0)?,
+                epic_id: row.get(1)?,
+                content: row.get(2)?,
+                created_at: parse_timestamp(&row.get::<_, String>(3)?)?,
+            })
+        })?;
+
+        notes.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
     // Batch operations
@@ -766,8 +882,8 @@ impl Database {
         let now_str = now.to_rfc3339();
         
         self.conn.execute(
-            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at) 
-             VALUES (?1, ?2, 'open', ?3, ?4, NULL, ?5, ?6, ?7, ?7)",
+            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, created_at, updated_at)
+             VALUES (?1, ?2, 'open', ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?9)",
             (
                 title,
                 original.description,
@@ -775,6 +891,8 @@ impl Database {
                 original.epic_id,
                 original.due_date.map(|d| d.to_string()),
                 original.tags,
+                original.notes,
+                original.user_info,
                 &now_str,
             ),
         )?;
@@ -819,10 +937,9 @@ impl Database {
             Ok(ExternalRef {
                 id: row.get(0)?,
                 task_id: row.get(1)?,
-                ref_type: row.get::<_, String>(2)?.parse().unwrap(),
+                ref_type: parse_ref_type(&row.get::<_, String>(2)?)?,
                 reference: row.get(3)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                created_at: parse_timestamp(&row.get::<_, String>(4)?)?,
             })
         });
 
@@ -845,10 +962,9 @@ impl Database {
             Ok(ExternalRef {
                 id: row.get(0)?,
                 task_id: row.get(1)?,
-                ref_type: row.get::<_, String>(2)?.parse().unwrap(),
+                ref_type: parse_ref_type(&row.get::<_, String>(2)?)?,
                 reference: row.get(3)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                created_at: parse_timestamp(&row.get::<_, String>(4)?)?,
             })
         })?;
 
@@ -1009,7 +1125,7 @@ impl Database {
     /// List all tasks (no filtering). Used by sync.
     pub fn list_all_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
              FROM tasks ORDER BY id"
         )?;
         let tasks = stmt.query_map([], |row| {
@@ -1018,16 +1134,17 @@ impl Database {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
-                status: row.get::<_, String>(3)?.parse().unwrap(),
-                priority: row.get::<_, String>(4)?.parse().unwrap(),
+                status: parse_status(&row.get::<_, String>(3)?)?,
+                priority: parse_priority(&row.get::<_, String>(4)?)?,
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
                 due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
                 tags: row.get(8)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
-                    .unwrap().with_timezone(&chrono::Local),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                notes: row.get(9)?,
+                user_info: row.get(10)?,
+                agent_questions: row.get(11)?,
+                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
             })
         })?;
         tasks.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -1036,7 +1153,7 @@ impl Database {
     /// List tasks that have no epic assigned.
     pub fn list_orphan_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
              FROM tasks WHERE epic_id IS NULL ORDER BY id"
         )?;
         let tasks = stmt.query_map([], |row| {
@@ -1045,16 +1162,17 @@ impl Database {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 description: row.get(2)?,
-                status: row.get::<_, String>(3)?.parse().unwrap(),
-                priority: row.get::<_, String>(4)?.parse().unwrap(),
+                status: parse_status(&row.get::<_, String>(3)?)?,
+                priority: parse_priority(&row.get::<_, String>(4)?)?,
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
                 due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
                 tags: row.get(8)?,
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(9)?)
-                    .unwrap().with_timezone(&chrono::Local),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(10)?)
-                    .unwrap().with_timezone(&chrono::Local),
+                notes: row.get(9)?,
+                user_info: row.get(10)?,
+                agent_questions: row.get(11)?,
+                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
             })
         })?;
         tasks.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
