@@ -19,8 +19,8 @@ fn main() {
         Commands::Init { force_agents } => commands::init::execute(force_agents),
         
         Commands::Epic(cmd) => match cmd {
-            EpicCommands::Create { title, description } => {
-                commands::epic::create(&title, description.as_deref(), &cli.format, cli.quiet)
+            EpicCommands::Create { title, description, notes, user_info } => {
+                commands::epic::create(&title, description.as_deref(), notes.as_deref(), user_info.as_deref(), &cli.format, cli.quiet)
             }
             EpicCommands::List => {
                 commands::epic::list(&cli.format, cli.quiet)
@@ -28,8 +28,14 @@ fn main() {
             EpicCommands::Show { id } => {
                 commands::epic::show(id, &cli.format, cli.quiet)
             }
-            EpicCommands::Update { id, title, description, status } => {
-                commands::epic::update(id, title.as_deref(), description.as_deref(), status.as_deref(), &cli.format, cli.quiet)
+            EpicCommands::Update { id, title, description, status, notes, user_info, agent_questions } => {
+                commands::epic::update(id, title.as_deref(), description.as_deref(), status.as_deref(), notes.as_deref(), user_info.as_deref(), agent_questions.as_deref(), &cli.format, cli.quiet)
+            }
+            EpicCommands::Note { epic_id, content } => {
+                commands::epic::add_note(epic_id, &content, &cli.format, cli.quiet)
+            }
+            EpicCommands::Notes { epic_id } => {
+                commands::epic::show_notes(epic_id, &cli.format, cli.quiet)
             }
             EpicCommands::Delete { id, force } => {
                 commands::epic::delete(id, force, cli.quiet)
@@ -37,8 +43,8 @@ fn main() {
         },
         
         Commands::Task(cmd) => match cmd {
-            TaskCommands::Create { title, description, epic, priority, assignee, due, tags, template } => {
-                commands::task::create(&title, description.as_deref(), epic, &priority, assignee, due.as_deref(), tags.as_deref(), template.as_deref(), &cli.format, cli.quiet)
+            TaskCommands::Create { title, description, epic, priority, assignee, due, tags, notes, user_info, template } => {
+                commands::task::create(&title, description.as_deref(), epic, &priority, assignee, due.as_deref(), tags.as_deref(), notes.as_deref(), user_info.as_deref(), template.as_deref(), &cli.format, cli.quiet)
             }
             TaskCommands::List { epic, status, priority, assignee, blocked, overdue, tag, all } => {
                 commands::task::list(epic, status.as_deref(), priority.as_deref(), assignee, blocked, overdue, tag.as_deref(), all, &cli.format, cli.quiet)
@@ -49,10 +55,12 @@ fn main() {
             TaskCommands::Show { id } => {
                 commands::task::show(id, &cli.format, cli.quiet)
             }
-            TaskCommands::Update { id, title, description, status, priority, epic, assignee, due, tags } => {
+            TaskCommands::Update { id, title, description, status, priority, epic, assignee, due, tags, notes, user_info, agent_questions } => {
                 commands::task::update(
-                    id, title.as_deref(), description.as_deref(), status.as_deref(), 
-                    priority.as_deref(), epic, assignee, due.as_deref(), tags.as_deref(), &cli.format, cli.quiet
+                    id, title.as_deref(), description.as_deref(), status.as_deref(),
+                    priority.as_deref(), epic, assignee, due.as_deref(), tags.as_deref(),
+                    notes.as_deref(), user_info.as_deref(), agent_questions.as_deref(),
+                    &cli.format, cli.quiet
                 )
             }
             TaskCommands::Delete { id, force } => {

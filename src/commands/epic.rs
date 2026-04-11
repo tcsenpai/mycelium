@@ -5,9 +5,9 @@ use crate::cli::OutputFormat;
 use crate::models::Status;
 use crate::error::Result;
 
-pub fn create(title: &str, description: Option<&str>, format: &OutputFormat, quiet: bool) -> Result<()> {
+pub fn create(title: &str, description: Option<&str>, notes: Option<&str>, user_info: Option<&str>, format: &OutputFormat, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
-    let epic = db.create_epic(title, description)?;
+    let epic = db.create_epic(title, description, notes, user_info)?;
     
     if quiet {
         println!("{}", epic.id);
@@ -103,6 +103,15 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
                 println!("  Description: {}", desc);
             }
             println!("  Status: {} {}", epic.status.emoji(), epic.status);
+            if let Some(notes) = &epic.notes {
+                println!("  Notes: {}", notes);
+            }
+            if let Some(user_info) = &epic.user_info {
+                println!("  User Info: {}", user_info);
+            }
+            if let Some(agent_questions) = &epic.agent_questions {
+                println!("  Agent Questions: {}", agent_questions.cyan());
+            }
             println!("  Created: {}", epic.created_at.format("%Y-%m-%d %H:%M"));
             println!();
             
@@ -128,11 +137,24 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn update(id: i64, title: Option<&str>, description: Option<&str>, status: Option<&str>, format: &OutputFormat, quiet: bool) -> Result<()> {
+pub fn update(
+    id: i64,
+    title: Option<&str>,
+    description: Option<&str>,
+    status: Option<&str>,
+    notes: Option<&str>,
+    user_info: Option<&str>,
+    agent_questions: Option<&str>,
+    format: &OutputFormat,
+    quiet: bool,
+) -> Result<()> {
     let mut db = ensure_initialized()?;
-    
+
     let status_enum: Option<Status> = status.map(|s| s.parse()).transpose()?;
-    let epic = db.update_epic(id, title, description, status_enum)?;
+    let notes_opt = notes.map(|n| if n == "-" { None } else { Some(n) });
+    let user_info_opt = user_info.map(|u| if u == "-" { None } else { Some(u) });
+    let agent_questions_opt = agent_questions.map(|q| if q == "-" { None } else { Some(q) });
+    let epic = db.update_epic(id, title, description, status_enum, notes_opt, user_info_opt, agent_questions_opt)?;
     
     if quiet {
         println!("{}", epic.id);
@@ -171,6 +193,74 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
     
     if !quiet {
         println!("{} Deleted epic #{}: {}", SUCCESS_PREFIX.green(), id.to_string().cyan(), epic.title);
+    }
+    Ok(())
+}
+
+pub fn add_note(epic_id: i64, content: &str, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let mut db = ensure_initialized()?;
+
+    let epic = db.get_epic(epic_id)?.ok_or_else(|| crate::error::MyceliumError::NotFound {
+        entity: "epic".to_string(),
+        id: epic_id.to_string(),
+    })?;
+
+    let note = db.add_epic_note(epic_id, content)?;
+
+    if quiet {
+        println!("{}", note.id);
+        return Ok(());
+    }
+
+    match format {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&note)?),
+        OutputFormat::Table => {
+            println!("{} Added note #{} to epic #{}: {}",
+                SUCCESS_PREFIX.green(),
+                note.id.to_string().cyan(),
+                epic_id.to_string().cyan(),
+                epic.title.bold()
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn show_notes(epic_id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let db = ensure_initialized()?;
+
+    let epic = db.get_epic(epic_id)?.ok_or_else(|| crate::error::MyceliumError::NotFound {
+        entity: "epic".to_string(),
+        id: epic_id.to_string(),
+    })?;
+
+    let notes = db.list_epic_notes(epic_id)?;
+
+    if quiet {
+        for note in &notes {
+            println!("{}", note.id);
+        }
+        return Ok(());
+    }
+
+    match format {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&notes)?),
+        OutputFormat::Table => {
+            println!("{} Notes for epic #{}: {}", INFO_PREFIX.blue(), epic_id.to_string().cyan(), epic.title.bold());
+
+            if notes.is_empty() {
+                println!("\n  No notes yet.");
+            } else {
+                println!();
+                for note in notes {
+                    println!("  {} {}: {}",
+                        "📝".cyan(),
+                        note.created_at.format("%Y-%m-%d %H:%M").to_string().dimmed(),
+                        note.content
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }

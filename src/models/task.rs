@@ -14,6 +14,9 @@ pub struct Task {
     pub assignee_id: Option<i64>,
     pub due_date: Option<NaiveDate>,
     pub tags: Option<String>,
+    pub notes: Option<String>,
+    pub user_info: Option<String>,
+    pub agent_questions: Option<String>,
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
 }
@@ -31,6 +34,9 @@ impl Task {
             assignee_id: None,
             due_date: None,
             tags: None,
+            notes: None,
+            user_info: None,
+            agent_questions: None,
             created_at: now,
             updated_at: now,
         }

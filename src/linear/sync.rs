@@ -392,6 +392,9 @@ fn apply_remote_to_local(
         None,
         Some(due_date),
         Some(tags.as_deref()),
+        None,
+        None,
+        None,
     )?;
 
     let local_task = db.get_task(entry.local_task_id)?;
@@ -423,10 +426,12 @@ fn create_local_from_remote(
         None,
         due_date,
         tags.as_deref(),
+        None,
+        None,
     )?;
 
     if status == Status::Closed {
-        db.update_task(task.id, None, None, Some(Status::Closed), None, None, None, None, None)?;
+        db.update_task(task.id, None, None, Some(Status::Closed), None, None, None, None, None, None, None, None)?;
     }
 
     let local_hash = mapping::hash_task(&task);

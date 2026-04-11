@@ -7,6 +7,9 @@ pub struct Epic {
     pub title: String,
     pub description: Option<String>,
     pub status: super::Status,
+    pub notes: Option<String>,
+    pub user_info: Option<String>,
+    pub agent_questions: Option<String>,
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
 }
@@ -19,6 +22,9 @@ impl Epic {
             title: title.into(),
             description: None,
             status: super::Status::Open,
+            notes: None,
+            user_info: None,
+            agent_questions: None,
             created_at: now,
             updated_at: now,
         }

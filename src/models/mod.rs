@@ -9,6 +9,7 @@ pub mod assignee;
 pub mod dependency;
 pub mod external_ref;
 pub mod task_note;
+pub mod epic_note;
 
 pub use epic::Epic;
 pub use task::Task;
@@ -16,6 +17,7 @@ pub use assignee::Assignee;
 pub use dependency::Dependency;
 pub use external_ref::ExternalRef;
 pub use task_note::TaskNote;
+pub use epic_note::EpicNote;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

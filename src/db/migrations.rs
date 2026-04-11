@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use crate::error::Result;
 
-const CURRENT_VERSION: i32 = 4;
+const CURRENT_VERSION: i32 = 5;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     create_migrations_table(conn)?;
@@ -26,6 +26,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if version < 4 {
         migrate_v4(conn)?;
         set_version(conn, 4)?;
+    }
+
+    if version < 5 {
+        migrate_v5(conn)?;
+        set_version(conn, 5)?;
     }
 
     Ok(())
@@ -240,6 +245,37 @@ fn migrate_v4(conn: &Connection) -> Result<()> {
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_linear_sync_issue ON linear_sync(linear_issue_id)",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn migrate_v5(conn: &Connection) -> Result<()> {
+    // Add notes, user_info, and agent_questions columns to tasks
+    conn.execute("ALTER TABLE tasks ADD COLUMN notes TEXT", [])?;
+    conn.execute("ALTER TABLE tasks ADD COLUMN user_info TEXT", [])?;
+    conn.execute("ALTER TABLE tasks ADD COLUMN agent_questions TEXT", [])?;
+
+    // Add notes, user_info, and agent_questions columns to epics
+    conn.execute("ALTER TABLE epics ADD COLUMN notes TEXT", [])?;
+    conn.execute("ALTER TABLE epics ADD COLUMN user_info TEXT", [])?;
+    conn.execute("ALTER TABLE epics ADD COLUMN agent_questions TEXT", [])?;
+
+    // Create epic_notes table (parallel to task_notes)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS epic_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            epic_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (epic_id) REFERENCES epics(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_epic_notes_epic ON epic_notes(epic_id)",
         [],
     )?;
 

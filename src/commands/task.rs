@@ -17,29 +17,31 @@ pub fn create(
     assignee_id: Option<i64>,
     due: Option<&str>,
     tags: Option<&str>,
+    notes: Option<&str>,
+    user_info: Option<&str>,
     template: Option<&str>,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
     let mut db = ensure_initialized()?;
-    
+
     // Apply template if specified
     let (final_priority, final_tags) = if let Some(template_name) = template {
         apply_template(template_name, priority, tags)?
     } else {
         (priority.to_string(), tags.map(|t| t.to_string()))
     };
-    
+
     // Parse relative dates
     let due_date = if let Some(d) = due {
         Some(parse_relative_date(d)?)
     } else {
         None
     };
-    
+
     let priority_enum: Priority = final_priority.parse()?;
-    
-    let task = db.create_task(title, description, epic_id, priority_enum, assignee_id, due_date, final_tags.as_deref())?;
+
+    let task = db.create_task(title, description, epic_id, priority_enum, assignee_id, due_date, final_tags.as_deref(), notes, user_info)?;
     
     if quiet {
         println!("{}", task.id);
@@ -470,6 +472,15 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
             if let Some(tags) = &task.tags {
                 println!("  Tags: {}", tags.yellow());
             }
+            if let Some(notes) = &task.notes {
+                println!("  Notes: {}", notes);
+            }
+            if let Some(user_info) = &task.user_info {
+                println!("  User Info: {}", user_info);
+            }
+            if let Some(agent_questions) = &task.agent_questions {
+                println!("  Agent Questions: {}", agent_questions.cyan());
+            }
             println!("  Created: {}", task.created_at.format("%Y-%m-%d %H:%M"));
             println!();
             
@@ -500,11 +511,14 @@ pub fn update(
     assignee_id: Option<i64>,
     due: Option<&str>,
     tags: Option<&str>,
+    notes: Option<&str>,
+    user_info: Option<&str>,
+    agent_questions: Option<&str>,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
     let mut db = ensure_initialized()?;
-    
+
     let status_enum = status.map(|s| s.parse::<Status>()).transpose()?;
     let priority_enum = priority.map(|p| p.parse::<Priority>()).transpose()?;
     let due_date = if let Some(d) = due {
@@ -512,12 +526,15 @@ pub fn update(
     } else {
         None
     };
-    
+
     let epic_opt = epic_id.map(|e| if e == 0 { None } else { Some(e) });
     let assignee_opt = assignee_id.map(|a| if a == 0 { None } else { Some(a) });
     let tags_opt = tags.map(|t| if t == "-" { None } else { Some(t) });
-    
-    let task = db.update_task(id, title, description, status_enum, priority_enum, epic_opt, assignee_opt, due_date, tags_opt)?;
+    let notes_opt = notes.map(|n| if n == "-" { None } else { Some(n) });
+    let user_info_opt = user_info.map(|u| if u == "-" { None } else { Some(u) });
+    let agent_questions_opt = agent_questions.map(|q| if q == "-" { None } else { Some(q) });
+
+    let task = db.update_task(id, title, description, status_enum, priority_enum, epic_opt, assignee_opt, due_date, tags_opt, notes_opt, user_info_opt, agent_questions_opt)?;
     
     if quiet {
         println!("{}", task.id);
@@ -560,7 +577,7 @@ pub fn assign(task_id: i64, assignee_id: i64, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
     
     let assignee_opt = if assignee_id == 0 { None } else { Some(assignee_id) };
-    let _task = db.update_task(task_id, None, None, None, None, None, Some(assignee_opt), None, None)?;
+    let _task = db.update_task(task_id, None, None, None, None, None, Some(assignee_opt), None, None, None, None, None)?;
     
     if !quiet {
         if assignee_id == 0 {
@@ -653,7 +670,7 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
         return Ok(());
     }
     
-    let updated = db.update_task(id, None, None, Some(Status::Closed), None, None, None, None, None)?;
+    let updated = db.update_task(id, None, None, Some(Status::Closed), None, None, None, None, None, None, None, None)?;
     
     if !quiet {
         println!("{} Closed task #{}: {}", SUCCESS_PREFIX.green(), id, updated.title);
@@ -664,7 +681,7 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
 pub fn reopen(id: i64, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
     
-    let updated = db.update_task(id, None, None, Some(Status::Open), None, None, None, None, None)?;
+    let updated = db.update_task(id, None, None, Some(Status::Open), None, None, None, None, None, None, None, None)?;
     
     if !quiet {
         println!("{} Reopened task #{}: {}", SUCCESS_PREFIX.green(), id, updated.title);
@@ -698,6 +715,8 @@ pub fn batch(file_path: &str, format: &OutputFormat, quiet: bool) -> Result<()> 
             task_input.assignee_id,
             due_date,
             task_input.tags.as_deref(),
+            task_input.notes.as_deref(),
+            task_input.user_info.as_deref(),
         )?;
         
         created_ids.push(task.id);
@@ -764,6 +783,8 @@ struct BatchTaskInput {
     assignee_id: Option<i64>,
     due: Option<String>,
     tags: Option<String>,
+    notes: Option<String>,
+    user_info: Option<String>,
     blocked_by: Option<Vec<i64>>,
     external_refs: Option<Vec<BatchExternalRef>>,
 }

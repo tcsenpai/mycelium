@@ -102,10 +102,18 @@ pub enum EpicCommands {
         /// Epic title
         #[arg(short, long)]
         title: String,
-        
+
         /// Epic description
         #[arg(short, long)]
         description: Option<String>,
+
+        /// Notes (free-form text for comments, tips, or context)
+        #[arg(short = 'n', long)]
+        notes: Option<String>,
+
+        /// Additional user info (context for agents or collaborators)
+        #[arg(long)]
+        user_info: Option<String>,
     },
     
     /// List all epics
@@ -133,8 +141,35 @@ pub enum EpicCommands {
         /// New status
         #[arg(short, long, value_parser = ["open", "closed"])]
         status: Option<String>,
+
+        /// New notes (use - to remove)
+        #[arg(short = 'n', long)]
+        notes: Option<String>,
+
+        /// New user info (use - to remove)
+        #[arg(long)]
+        user_info: Option<String>,
+
+        /// Agent questions (use - to remove)
+        #[arg(long)]
+        agent_questions: Option<String>,
     },
-    
+
+    /// Add a note to an epic
+    Note {
+        /// Epic ID
+        epic_id: i64,
+
+        /// Note content
+        content: String,
+    },
+
+    /// Show epic notes
+    Notes {
+        /// Epic ID
+        epic_id: i64,
+    },
+
     /// Delete an epic
     Delete {
         /// Epic ID
@@ -177,7 +212,15 @@ pub enum TaskCommands {
         /// Tags (comma-separated, e.g., "frontend,urgent")
         #[arg(short = 'g', long)]
         tags: Option<String>,
-        
+
+        /// Notes (free-form text for comments, tips, or context)
+        #[arg(short = 'n', long)]
+        notes: Option<String>,
+
+        /// Additional user info (context for agents or collaborators)
+        #[arg(long)]
+        user_info: Option<String>,
+
         /// Use a template
         #[arg(short = 'm', long)]
         template: Option<String>,
@@ -267,8 +310,20 @@ pub enum TaskCommands {
         /// New tags (comma-separated, use - to remove)
         #[arg(short = 'g', long)]
         tags: Option<String>,
+
+        /// New notes (use - to remove)
+        #[arg(short = 'n', long)]
+        notes: Option<String>,
+
+        /// New user info (use - to remove)
+        #[arg(long)]
+        user_info: Option<String>,
+
+        /// Agent questions (use - to remove)
+        #[arg(long)]
+        agent_questions: Option<String>,
     },
-    
+
     /// Delete a task
     Delete {
         /// Task ID
