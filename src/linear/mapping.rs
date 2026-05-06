@@ -89,6 +89,12 @@ pub fn status_to_linear_state_id(
             .get("open")
             .cloned()
             .unwrap_or_else(|| "Todo".to_string()),
+        Status::InProgress => config
+            .mapping
+            .status
+            .get("in_progress")
+            .cloned()
+            .unwrap_or_else(|| "In Progress".to_string()),
         Status::Closed => config
             .mapping
             .status
@@ -105,6 +111,7 @@ pub fn status_to_linear_state_id(
     // Fallback: match by state type
     let fallback_type = match status {
         Status::Open => "unstarted",
+        Status::InProgress => "started",
         Status::Closed => "completed",
     };
     states
@@ -123,6 +130,7 @@ pub fn status_to_linear_state_id(
 pub fn status_from_linear(state: &LinearWorkflowState) -> Status {
     match state.state_type.as_str() {
         "completed" | "cancelled" => Status::Closed,
+        "started" | "in_progress" => Status::InProgress,
         _ => Status::Open,
     }
 }

@@ -27,7 +27,7 @@ pub enum MyceliumError {
     #[error("Invalid priority: {0}. Use: low, medium, high, critical")]
     InvalidPriority(String),
 
-    #[error("Invalid status: {0}. Use: open, closed")]
+    #[error("Invalid status: {0}. Use: open, in_progress, closed")]
     InvalidStatus(String),
 
     #[error("Invalid date format: {0}. Use: YYYY-MM-DD")]

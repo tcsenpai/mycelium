@@ -77,6 +77,7 @@ impl Priority {
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Open,
+    InProgress,
     Closed,
 }
 
@@ -84,6 +85,7 @@ impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Status::Open => write!(f, "open"),
+            Status::InProgress => write!(f, "in_progress"),
             Status::Closed => write!(f, "closed"),
         }
     }
@@ -95,6 +97,8 @@ impl FromStr for Status {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "open" => Ok(Status::Open),
+            "in_progress" => Ok(Status::InProgress),
+            "in-progress" => Ok(Status::InProgress),
             "closed" => Ok(Status::Closed),
             _ => Err(crate::error::MyceliumError::InvalidStatus(s.to_string())),
         }
@@ -105,6 +109,7 @@ impl Status {
     pub fn as_str(&self) -> &'static str {
         match self {
             Status::Open => "open",
+            Status::InProgress => "in_progress",
             Status::Closed => "closed",
         }
     }
@@ -112,6 +117,7 @@ impl Status {
     pub fn emoji(&self) -> &'static str {
         match self {
             Status::Open => "⭕",
+            Status::InProgress => "🔄",
             Status::Closed => "✅",
         }
     }

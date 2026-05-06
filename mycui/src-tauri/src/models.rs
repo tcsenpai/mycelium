@@ -124,6 +124,7 @@ pub struct TaskFilters {
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Open,
+    InProgress,
     Closed,
 }
 
@@ -131,6 +132,7 @@ impl std::fmt::Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Status::Open => write!(f, "open"),
+            Status::InProgress => write!(f, "in_progress"),
             Status::Closed => write!(f, "closed"),
         }
     }
@@ -141,6 +143,7 @@ impl std::str::FromStr for Status {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "open" => Ok(Status::Open),
+            "in_progress" | "in-progress" => Ok(Status::InProgress),
             "closed" => Ok(Status::Closed),
             _ => Err(format!("Invalid status: {}", s)),
         }

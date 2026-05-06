@@ -135,14 +135,14 @@ Mycelium's state must remain predictable and auditable at all times.
 > The state of Mycelium after any operation must be explainable to another agent with zero context.
 "#;
 
-pub fn execute(force_agents: bool) -> Result<()> {
+pub fn execute(force_init: bool) -> Result<()> {
     let cwd = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mycelium_dir = cwd.join(".mycelium");
     let db_path = mycelium_dir.join("mycelium.db");
     let agents_md_path = cwd.join("AGENTS.md");
 
-    if mycelium_dir.exists() && !force_agents {
+    if mycelium_dir.exists() && !force_init {
         println!("{} Mycelium project already initialized", INFO_PREFIX.blue());
         return Ok(());
     }
@@ -169,27 +169,53 @@ pub fn execute(force_agents: bool) -> Result<()> {
         println!("  Git tracking: Add {} to your repo", ".mycelium/".cyan());
     }
 
-    // Create, append, or force-regenerate AGENTS.md
-    if force_agents {
-        if agents_md_path.exists() {
-            // Remove existing Mycelium section and rewrite it
-            let existing = fs::read_to_string(&agents_md_path)?;
+    // Create AGENTS.md if it doesn't exist
+    if !agents_md_path.exists() {
+        fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
+        println!("{} Created AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
+    } else {
+        let existing = fs::read_to_string(&agents_md_path)?;
+        if !existing.contains("## Project Management with Mycelium") {
             let cleaned = remove_mycelium_section(&existing);
             if cleaned.trim().is_empty() {
                 fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
             } else {
                 fs::write(&agents_md_path, format!("{}\n{}", cleaned.trim_end(), AGENTS_MD_CONTENT))?;
             }
-        } else {
-            fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
-        }
-        println!("{} Regenerated AGENTS.md with mycelium instructions", SUCCESS_PREFIX.green());
-    } else if agents_md_path.exists() {
-        let existing = fs::read_to_string(&agents_md_path)?;
-        if !existing.contains("Mycelium") {
-            fs::write(&agents_md_path, format!("{}\n{}", existing, AGENTS_MD_CONTENT))?;
             println!("{} Updated AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
         }
+    }
+
+    Ok(())
+}
+
+pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let agents_md_path = path.map(|p| cwd.join(p)).unwrap_or_else(|| cwd.join("AGENTS.md"));
+
+    if agents_md_path.exists() && !force {
+        let existing = fs::read_to_string(&agents_md_path)?;
+        if existing.contains("## Project Management with Mycelium") {
+            println!("{} AGENTS.md already contains Mycelium instructions (use --force to regenerate)", INFO_PREFIX.blue());
+            return Ok(());
+        }
+        let cleaned = remove_mycelium_section(&existing);
+        if cleaned.trim().is_empty() {
+            fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
+        } else {
+            fs::write(&agents_md_path, format!("{}\n{}", cleaned.trim_end(), AGENTS_MD_CONTENT))?;
+        }
+        println!("{} Updated AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
+    } else if agents_md_path.exists() {
+        let existing = fs::read_to_string(&agents_md_path)?;
+        let cleaned = remove_mycelium_section(&existing);
+        if cleaned.trim().is_empty() {
+            fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
+        } else {
+            fs::write(&agents_md_path, format!("{}\n{}", cleaned.trim_end(), AGENTS_MD_CONTENT))?;
+        }
+        println!("{} Regenerated AGENTS.md with mycelium instructions", SUCCESS_PREFIX.green());
     } else {
         fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
         println!("{} Created AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
