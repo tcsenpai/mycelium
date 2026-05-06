@@ -5,9 +5,9 @@ use crate::cli::OutputFormat;
 use crate::models::Status;
 use crate::error::Result;
 
-pub fn create(title: &str, description: Option<&str>, notes: Option<&str>, user_info: Option<&str>, format: &OutputFormat, quiet: bool) -> Result<()> {
+pub fn create(title: &str, description: Option<&str>, notes: Option<&str>, user_info: Option<&str>, is_knowledge: bool, key_questions: Option<&str>, format: &OutputFormat, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
-    let epic = db.create_epic(title, description, notes, user_info)?;
+    let epic = db.create_epic(title, description, notes, user_info, is_knowledge, key_questions)?;
     
     if quiet {
         println!("{}", epic.id);

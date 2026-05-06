@@ -56,6 +56,9 @@ pub enum MyceliumError {
 
     #[error("HTTP error: {0}")]
     Http(String),
+
+    #[error("Embedding error: {0}")]
+    Embedding(String),
 }
 
 pub type Result<T> = std::result::Result<T, MyceliumError>;

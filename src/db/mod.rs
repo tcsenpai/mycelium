@@ -80,12 +80,12 @@ impl Database {
     }
 
     // Epic operations
-    pub fn create_epic(&mut self, title: &str, description: Option<&str>, notes: Option<&str>, user_info: Option<&str>) -> Result<Epic> {
+    pub fn create_epic(&mut self, title: &str, description: Option<&str>, notes: Option<&str>, user_info: Option<&str>, is_knowledge: bool, key_questions: Option<&str>) -> Result<Epic> {
         let now = chrono::Local::now().to_rfc3339();
         self.conn.execute(
-            "INSERT INTO epics (title, description, status, notes, user_info, created_at, updated_at)
-             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?5)",
-            (title, description, notes, user_info, now),
+            "INSERT INTO epics (title, description, status, notes, user_info, is_knowledge, key_questions, created_at, updated_at)
+             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?6, ?7, ?7)",
+            (title, description, notes, user_info, is_knowledge as i64, key_questions, now),
         )?;
         let id = self.conn.last_insert_rowid();
         self.get_epic(id)
@@ -97,7 +97,7 @@ impl Database {
 
     pub fn get_epic(&self, id: i64) -> Result<Option<Epic>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, notes, user_info, agent_questions, created_at, updated_at FROM epics WHERE id = ?1"
+            "SELECT id, title, description, status, notes, user_info, agent_questions, is_knowledge, key_questions, created_at, updated_at FROM epics WHERE id = ?1"
         )?;
 
         let epic = stmt.query_row([id], |row| {
@@ -109,8 +109,10 @@ impl Database {
                 notes: row.get(4)?,
                 user_info: row.get(5)?,
                 agent_questions: row.get(6)?,
-                created_at: parse_timestamp(&row.get::<_, String>(7)?)?,
-                updated_at: parse_timestamp(&row.get::<_, String>(8)?)?,
+                is_knowledge: row.get::<_, i32>(7)? != 0,
+                key_questions: row.get(8)?,
+                created_at: parse_timestamp(&row.get::<_, String>(9)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(10)?)?,
             })
         });
 
@@ -123,7 +125,7 @@ impl Database {
 
     pub fn list_epics(&self) -> Result<Vec<Epic>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, notes, user_info, agent_questions, created_at, updated_at FROM epics ORDER BY created_at DESC"
+            "SELECT id, title, description, status, notes, user_info, agent_questions, is_knowledge, key_questions, created_at, updated_at FROM epics ORDER BY created_at DESC"
         )?;
 
         let epics = stmt.query_map([], |row| {
@@ -135,8 +137,10 @@ impl Database {
                 notes: row.get(4)?,
                 user_info: row.get(5)?,
                 agent_questions: row.get(6)?,
-                created_at: parse_timestamp(&row.get::<_, String>(7)?)?,
-                updated_at: parse_timestamp(&row.get::<_, String>(8)?)?,
+                is_knowledge: row.get::<_, i32>(7)? != 0,
+                key_questions: row.get(8)?,
+                created_at: parse_timestamp(&row.get::<_, String>(9)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(10)?)?,
             })
         })?;
 
@@ -146,7 +150,7 @@ impl Database {
     pub fn list_epics_with_summary(&self) -> Result<Vec<epic::EpicSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT
-                e.id, e.title, e.description, e.status, e.notes, e.user_info, e.agent_questions, e.created_at, e.updated_at,
+                e.id, e.title, e.description, e.status, e.notes, e.user_info, e.agent_questions, e.is_knowledge, e.key_questions, e.created_at, e.updated_at,
                 COUNT(t.id) as total_tasks,
                 SUM(CASE WHEN t.status = 'open' THEN 1 ELSE 0 END) as open_tasks,
                 SUM(CASE WHEN t.status = 'closed' THEN 1 ELSE 0 END) as closed_tasks
@@ -166,12 +170,14 @@ impl Database {
                     notes: row.get(4)?,
                     user_info: row.get(5)?,
                     agent_questions: row.get(6)?,
-                    created_at: parse_timestamp(&row.get::<_, String>(7)?)?,
-                    updated_at: parse_timestamp(&row.get::<_, String>(8)?)?,
+                    is_knowledge: row.get::<_, i32>(7)? != 0,
+                    key_questions: row.get(8)?,
+                    created_at: parse_timestamp(&row.get::<_, String>(9)?)?,
+                    updated_at: parse_timestamp(&row.get::<_, String>(10)?)?,
                 },
-                total_tasks: row.get(9)?,
-                open_tasks: row.get(10)?,
-                closed_tasks: row.get(11)?,
+                total_tasks: row.get(11)?,
+                open_tasks: row.get(12)?,
+                closed_tasks: row.get(13)?,
             })
         })?;
 
@@ -233,14 +239,16 @@ impl Database {
         tags: Option<&str>,
         notes: Option<&str>,
         user_info: Option<&str>,
+        is_knowledge: bool,
+        key_questions: Option<&str>,
     ) -> Result<Task> {
         let now = chrono::Local::now().to_rfc3339();
         let due_date_str = due_date.map(|d| d.to_string());
 
         self.conn.execute(
-            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, created_at, updated_at)
-             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
-            (title, description, priority.to_string(), epic_id, assignee_id, due_date_str, tags, notes, user_info, now),
+            "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, is_knowledge, key_questions, created_at, updated_at)
+             VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+            (title, description, priority.to_string(), epic_id, assignee_id, due_date_str, tags, notes, user_info, is_knowledge as i64, key_questions, now),
         )?;
         
         let id = self.conn.last_insert_rowid();
@@ -253,7 +261,7 @@ impl Database {
 
     pub fn get_task(&self, id: i64) -> Result<Option<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, is_knowledge, key_questions, created_at, updated_at
              FROM tasks WHERE id = ?1"
         )?;
 
@@ -272,8 +280,10 @@ impl Database {
                 notes: row.get(9)?,
                 user_info: row.get(10)?,
                 agent_questions: row.get(11)?,
-                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
-                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                is_knowledge: row.get::<_, i32>(12)? != 0,
+                key_questions: row.get(13)?,
+                created_at: parse_timestamp(&row.get::<_, String>(14)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(15)?)?,
             })
         });
 
@@ -324,7 +334,7 @@ impl Database {
         }
 
         let sql = format!(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, is_knowledge, key_questions, created_at, updated_at
              FROM tasks
              WHERE {}
              ORDER BY
@@ -356,8 +366,10 @@ impl Database {
                 notes: row.get(9)?,
                 user_info: row.get(10)?,
                 agent_questions: row.get(11)?,
-                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
-                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                is_knowledge: row.get::<_, i32>(12)? != 0,
+                key_questions: row.get(13)?,
+                created_at: parse_timestamp(&row.get::<_, String>(14)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(15)?)?,
             })
         })?;
 
@@ -1125,7 +1137,7 @@ impl Database {
     /// List all tasks (no filtering). Used by sync.
     pub fn list_all_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, is_knowledge, key_questions, created_at, updated_at
              FROM tasks ORDER BY id"
         )?;
         let tasks = stmt.query_map([], |row| {
@@ -1143,8 +1155,10 @@ impl Database {
                 notes: row.get(9)?,
                 user_info: row.get(10)?,
                 agent_questions: row.get(11)?,
-                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
-                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                is_knowledge: row.get::<_, i32>(12)? != 0,
+                key_questions: row.get(13)?,
+                created_at: parse_timestamp(&row.get::<_, String>(14)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(15)?)?,
             })
         })?;
         tasks.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -1153,7 +1167,7 @@ impl Database {
     /// List tasks that have no epic assigned.
     pub fn list_orphan_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, is_knowledge, key_questions, created_at, updated_at
              FROM tasks WHERE epic_id IS NULL ORDER BY id"
         )?;
         let tasks = stmt.query_map([], |row| {
@@ -1171,8 +1185,10 @@ impl Database {
                 notes: row.get(9)?,
                 user_info: row.get(10)?,
                 agent_questions: row.get(11)?,
-                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
-                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                is_knowledge: row.get::<_, i32>(12)? != 0,
+                key_questions: row.get(13)?,
+                created_at: parse_timestamp(&row.get::<_, String>(14)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(15)?)?,
             })
         })?;
         tasks.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
@@ -1181,6 +1197,78 @@ impl Database {
     /// Delete all tasks that have no epic assigned. Returns count deleted.
     pub fn delete_orphan_tasks(&mut self) -> Result<usize> {
         let count = self.conn.execute("DELETE FROM tasks WHERE epic_id IS NULL", [])?;
+        Ok(count)
+    }
+
+    // Embedding operations
+
+    /// Upsert an embedding for an entity. Replaces existing if entity_type+entity_id match.
+    pub fn upsert_embedding(
+        &mut self,
+        entity_type: &str,
+        entity_id: i64,
+        content_hash: &str,
+        embedding: &[f32],
+        model_version: &str,
+    ) -> Result<()> {
+        let now = chrono::Local::now().to_rfc3339();
+        let blob: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+
+        // Delete existing embedding for this entity
+        self.conn.execute(
+            "DELETE FROM embeddings WHERE entity_type = ?1 AND entity_id = ?2",
+            (entity_type, entity_id),
+        )?;
+
+        self.conn.execute(
+            "INSERT INTO embeddings (entity_type, entity_id, content_hash, embedding, model_version, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (entity_type, entity_id, content_hash, blob, model_version, &now),
+        )?;
+        Ok(())
+    }
+
+    /// Get the content hash for an existing embedding.
+    pub fn get_embedding_hash(&self, entity_type: &str, entity_id: i64) -> Result<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT content_hash FROM embeddings WHERE entity_type = ?1 AND entity_id = ?2",
+            (entity_type, entity_id),
+            |row| row.get(0),
+        );
+        match result {
+            Ok(hash) => Ok(Some(hash)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Get all embeddings (for similarity search).
+    pub fn get_all_embeddings(&self) -> Result<Vec<EmbeddingRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, entity_type, entity_id, embedding FROM embeddings"
+        )?;
+
+        let records = stmt.query_map([], |row| {
+            let blob: Vec<u8> = row.get(3)?;
+            let embedding: Vec<f32> = blob.chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect();
+            Ok(EmbeddingRecord {
+                id: row.get(0)?,
+                entity_type: row.get(1)?,
+                entity_id: row.get(2)?,
+                embedding,
+            })
+        })?;
+
+        records.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// Count total embeddings.
+    pub fn count_embeddings(&self) -> Result<i64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM embeddings", [], |row| row.get(0)
+        )?;
         Ok(count)
     }
 }
@@ -1195,6 +1283,14 @@ pub struct LinearSyncEntry {
     pub last_local_hash: String,
     pub last_remote_hash: String,
     pub sync_direction: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbeddingRecord {
+    pub id: i64,
+    pub entity_type: String,
+    pub entity_id: i64,
+    pub embedding: Vec<f32>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

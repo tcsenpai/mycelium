@@ -64,6 +64,13 @@ pub enum Commands {
     /// Linear integration (bidirectional sync)
     #[command(subcommand)]
     Linear(LinearCommands),
+
+    /// Index content for semantic search
+    #[command(subcommand)]
+    Embed(EmbedCommands),
+
+    /// Semantic search across tasks and epics
+    Search(SearchArgs),
 }
 
 #[derive(Subcommand)]
@@ -114,6 +121,14 @@ pub enum EpicCommands {
         /// Additional user info (context for agents or collaborators)
         #[arg(long)]
         user_info: Option<String>,
+
+        /// Mark as knowledge base item for semantic search
+        #[arg(long)]
+        knowledge: bool,
+
+        /// Key questions this epic answers (comma-separated)
+        #[arg(long)]
+        questions: Option<String>,
     },
     
     /// List all epics
@@ -224,6 +239,14 @@ pub enum TaskCommands {
         /// Use a template
         #[arg(short = 'm', long)]
         template: Option<String>,
+
+        /// Mark as knowledge base item for semantic search
+        #[arg(long)]
+        knowledge: bool,
+
+        /// Key questions this task answers (comma-separated)
+        #[arg(long)]
+        questions: Option<String>,
     },
     
     /// List tasks
@@ -585,6 +608,53 @@ pub enum ExportCommands {
         #[arg(short, long)]
         output: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+pub enum EmbedCommands {
+    /// Index a specific task
+    Task {
+        /// Task ID
+        id: i64,
+
+        /// Force re-index even if content unchanged
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Index a specific epic
+    Epic {
+        /// Epic ID
+        id: i64,
+
+        /// Force re-index even if content unchanged
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Index all unindexed tasks and epics
+    All {
+        /// Force re-index everything
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Show embedding index status
+    Status,
+}
+
+#[derive(Args)]
+pub struct SearchArgs {
+    /// Search query
+    pub query: String,
+
+    /// Number of results to return
+    #[arg(short = 'n', long, default_value = "10")]
+    pub top: usize,
+
+    /// Search only knowledge items
+    #[arg(long)]
+    pub knowledge: bool,
 }
 
 #[derive(Clone, Debug)]

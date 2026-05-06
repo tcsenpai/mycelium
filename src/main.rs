@@ -3,11 +3,12 @@ use clap::Parser;
 mod cli;
 mod commands;
 mod db;
+mod embedding;
 mod error;
 mod linear;
 mod models;
 
-use cli::{Cli, Commands, EpicCommands, TaskCommands, AssigneeCommands, DepsCommands, ExportCommands, LinkCommands, BatchOpCommands, LinearCommands};
+use cli::{Cli, Commands, EpicCommands, TaskCommands, AssigneeCommands, DepsCommands, ExportCommands, LinkCommands, BatchOpCommands, LinearCommands, EmbedCommands};
 use error::handle_error;
 
 pub use commands::{ERROR_PREFIX, SUCCESS_PREFIX, INFO_PREFIX, WARNING_PREFIX};
@@ -19,8 +20,8 @@ fn main() {
         Commands::Init { force_agents } => commands::init::execute(force_agents),
         
         Commands::Epic(cmd) => match cmd {
-            EpicCommands::Create { title, description, notes, user_info } => {
-                commands::epic::create(&title, description.as_deref(), notes.as_deref(), user_info.as_deref(), &cli.format, cli.quiet)
+            EpicCommands::Create { title, description, notes, user_info, knowledge, questions } => {
+                commands::epic::create(&title, description.as_deref(), notes.as_deref(), user_info.as_deref(), knowledge, questions.as_deref(), &cli.format, cli.quiet)
             }
             EpicCommands::List => {
                 commands::epic::list(&cli.format, cli.quiet)
@@ -43,8 +44,8 @@ fn main() {
         },
         
         Commands::Task(cmd) => match cmd {
-            TaskCommands::Create { title, description, epic, priority, assignee, due, tags, notes, user_info, template } => {
-                commands::task::create(&title, description.as_deref(), epic, &priority, assignee, due.as_deref(), tags.as_deref(), notes.as_deref(), user_info.as_deref(), template.as_deref(), &cli.format, cli.quiet)
+            TaskCommands::Create { title, description, epic, priority, assignee, due, tags, notes, user_info, template, knowledge, questions } => {
+                commands::task::create(&title, description.as_deref(), epic, &priority, assignee, due.as_deref(), tags.as_deref(), notes.as_deref(), user_info.as_deref(), template.as_deref(), knowledge, questions.as_deref(), &cli.format, cli.quiet)
             }
             TaskCommands::List { epic, status, priority, assignee, blocked, overdue, tag, all } => {
                 commands::task::list(epic, status.as_deref(), priority.as_deref(), assignee, blocked, overdue, tag.as_deref(), all, &cli.format, cli.quiet)
@@ -181,6 +182,25 @@ fn main() {
             LinearCommands::Unlink => {
                 commands::linear::unlink_cmd(cli.quiet)
             }
+        }
+
+        Commands::Embed(cmd) => match cmd {
+            EmbedCommands::Task { id, force } => {
+                commands::embed::embed_task(id, force, cli.quiet)
+            }
+            EmbedCommands::Epic { id, force } => {
+                commands::embed::embed_epic(id, force, cli.quiet)
+            }
+            EmbedCommands::All { force } => {
+                commands::embed::embed_all(force, cli.quiet)
+            }
+            EmbedCommands::Status => {
+                commands::embed::status(cli.quiet)
+            }
+        }
+
+        Commands::Search(args) => {
+            commands::search::semantic_search(&args.query, args.top, args.knowledge, cli.quiet)
         }
     };
     

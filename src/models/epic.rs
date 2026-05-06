@@ -10,6 +10,8 @@ pub struct Epic {
     pub notes: Option<String>,
     pub user_info: Option<String>,
     pub agent_questions: Option<String>,
+    pub is_knowledge: bool,
+    pub key_questions: Option<String>,
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
 }
@@ -25,6 +27,8 @@ impl Epic {
             notes: None,
             user_info: None,
             agent_questions: None,
+            is_knowledge: false,
+            key_questions: None,
             created_at: now,
             updated_at: now,
         }

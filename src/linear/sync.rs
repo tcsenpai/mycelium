@@ -428,6 +428,8 @@ fn create_local_from_remote(
         tags.as_deref(),
         None,
         None,
+        false, // is_knowledge default for Linear sync
+        None,  // key_questions default for Linear sync
     )?;
 
     if status == Status::Closed {

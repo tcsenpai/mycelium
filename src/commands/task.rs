@@ -20,6 +20,8 @@ pub fn create(
     notes: Option<&str>,
     user_info: Option<&str>,
     template: Option<&str>,
+    is_knowledge: bool,
+    key_questions: Option<&str>,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
@@ -41,7 +43,19 @@ pub fn create(
 
     let priority_enum: Priority = final_priority.parse()?;
 
-    let task = db.create_task(title, description, epic_id, priority_enum, assignee_id, due_date, final_tags.as_deref(), notes, user_info)?;
+    let task = db.create_task(
+        title,
+        description,
+        epic_id,
+        priority_enum,
+        assignee_id,
+        due_date,
+        final_tags.as_deref(),
+        notes,
+        user_info,
+        is_knowledge,
+        key_questions,
+    )?;
     
     if quiet {
         println!("{}", task.id);
@@ -672,6 +686,11 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
     
     let updated = db.update_task(id, None, None, Some(Status::Closed), None, None, None, None, None, None, None, None)?;
     
+    // Auto-index closed tasks for semantic search
+    if let Err(e) = crate::commands::embed::embed_task(id, false, true) {
+        eprintln!("{} Warning: failed to index task for search: {}", WARNING_PREFIX.yellow(), e);
+    }
+    
     if !quiet {
         println!("{} Closed task #{}: {}", SUCCESS_PREFIX.green(), id, updated.title);
     }
@@ -717,6 +736,8 @@ pub fn batch(file_path: &str, format: &OutputFormat, quiet: bool) -> Result<()> 
             task_input.tags.as_deref(),
             task_input.notes.as_deref(),
             task_input.user_info.as_deref(),
+            false, // is_knowledge default for batch
+            None,  // key_questions default for batch
         )?;
         
         created_ids.push(task.id);

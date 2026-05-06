@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use crate::error::Result;
 
-const CURRENT_VERSION: i32 = 5;
+const CURRENT_VERSION: i32 = 6;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     create_migrations_table(conn)?;
@@ -31,6 +31,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if version < 5 {
         migrate_v5(conn)?;
         set_version(conn, 5)?;
+    }
+
+    if version < 6 {
+        migrate_v6(conn)?;
+        set_version(conn, 6)?;
     }
 
     Ok(())
@@ -276,6 +281,41 @@ fn migrate_v5(conn: &Connection) -> Result<()> {
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_epic_notes_epic ON epic_notes(epic_id)",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn migrate_v6(conn: &Connection) -> Result<()> {
+    // Add is_knowledge and key_questions to tasks
+    conn.execute("ALTER TABLE tasks ADD COLUMN is_knowledge INTEGER NOT NULL DEFAULT 0", [])?;
+    conn.execute("ALTER TABLE tasks ADD COLUMN key_questions TEXT", [])?;
+
+    // Add is_knowledge and key_questions to epics
+    conn.execute("ALTER TABLE epics ADD COLUMN is_knowledge INTEGER NOT NULL DEFAULT 0", [])?;
+    conn.execute("ALTER TABLE epics ADD COLUMN key_questions TEXT", [])?;
+
+    // Embeddings table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER NOT NULL,
+            content_hash TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            model_version TEXT,
+            created_at TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_embeddings_entity ON embeddings(entity_type, entity_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_embeddings_hash ON embeddings(content_hash)",
         [],
     )?;
 
