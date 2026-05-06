@@ -22,10 +22,17 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Initialize a new mycelium project
-    Init {
-        /// Force regeneration of AGENTS.md even if it already exists
+    Init,
+
+    /// Generate or update AGENTS.md with mycelium instructions
+    PrimeAgents {
+        /// Force regeneration even if file exists
         #[arg(long)]
-        force_agents: bool,
+        force: bool,
+
+        /// Path to AGENTS.md (defaults to ./AGENTS.md)
+        #[arg(long)]
+        path: Option<std::path::PathBuf>,
     },
     
     /// Manage epics
@@ -139,7 +146,7 @@ pub enum EpicCommands {
         description: Option<String>,
         
         /// New status
-        #[arg(short, long, value_parser = ["open", "closed"])]
+        #[arg(short, long, value_parser = ["open", "in_progress", "closed"])]
         status: Option<String>,
 
         /// New notes (use - to remove)

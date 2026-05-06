@@ -140,6 +140,7 @@ fn default_epic_mode() -> String {
 fn default_status_mapping() -> HashMap<String, String> {
     let mut m = HashMap::new();
     m.insert("open".to_string(), "Todo".to_string());
+    m.insert("in_progress".to_string(), "In Progress".to_string());
     m.insert("closed".to_string(), "Done".to_string());
     m
 }
