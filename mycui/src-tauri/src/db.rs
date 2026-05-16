@@ -788,7 +788,8 @@ impl Database {
 
     pub fn append_followup_body(&mut self, id: i64, text: &str) -> Result<Followup, rusqlite::Error> {
         let existing = self.get_followup(id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-        let stamp = Local::now().format("%Y-%m-%d %H:%M");
+        // Match CLI: include TZ offset so timestamps survive across machines.
+        let stamp = Local::now().format("%Y-%m-%d %H:%M %z");
         let new_body = if existing.body.trim().is_empty() {
             format!("[{}] {}", stamp, text)
         } else {

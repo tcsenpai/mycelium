@@ -2310,7 +2310,8 @@ const initialFollowupComposer: FollowupComposerState = { body: '', title: '' };
 
 function FollowupsView() {
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<'active' | 'all'>('active');
+  // Default matches CLI: show all. -o/-c live as chip toggles in the UI.
+  const [filter, setFilter] = useState<'active' | 'all'>('all');
   const [composer, setComposer] = useState<FollowupComposerState>(initialFollowupComposer);
   const [appendingId, setAppendingId] = useState<number | null>(null);
   const [appendText, setAppendText] = useState('');

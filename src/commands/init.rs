@@ -234,10 +234,17 @@ pub fn execute(force_init: bool) -> Result<()> {
         println!("{} Created AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
     } else {
         let existing = fs::read_to_string(&agents_md_path)?;
-        let result = apply_marker_block(&existing, false);
-        if let Some((updated, action)) = result {
-            fs::write(&agents_md_path, updated)?;
-            println!("{} {} AGENTS.md mycelium block", INFO_PREFIX.blue(), action);
+        match apply_marker_block(&existing, false) {
+            Some((updated, action)) => {
+                fs::write(&agents_md_path, updated)?;
+                println!("{} {} AGENTS.md mycelium block", INFO_PREFIX.blue(), action);
+            }
+            None => {
+                println!(
+                    "{} AGENTS.md mycelium block already at v{} — no change",
+                    INFO_PREFIX.blue(), AGENTS_MD_VERSION
+                );
+            }
         }
     }
 
@@ -445,6 +452,17 @@ mod tests {
         let (updated, action) = apply_marker_block(&original, true).expect("should update");
         assert_eq!(action, "Regenerated");
         assert!(!updated.contains("stale body"));
+    }
+
+    #[test]
+    fn marker_block_roundtrips_through_find() {
+        // marker_block() output must be parseable by find_marker_block() and
+        // the version we wrote must match what we read back. Catches any
+        // format drift between the two functions.
+        let block = marker_block();
+        let wrapped = format!("# Agent Instructions\n\nSome user content.\n\n{}\n", block);
+        let (_s, _e, ver) = find_marker_block(&wrapped).expect("must locate marker");
+        assert_eq!(ver, Some(AGENTS_MD_VERSION));
     }
 
     #[test]

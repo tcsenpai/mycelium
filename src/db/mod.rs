@@ -1398,7 +1398,7 @@ impl Database {
         Ok(())
     }
 
-    /// (open_count, in_progress_count, done_count, wontfix_count)
+    /// Count rows grouped by status. Returns zero for absent buckets.
     pub fn count_followups(&self) -> Result<FollowupCounts> {
         let mut stmt = self.conn.prepare(
             "SELECT status, COUNT(*) FROM followups GROUP BY status"

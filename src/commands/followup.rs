@@ -2,7 +2,7 @@ use colored::Colorize;
 use comfy_table::{ContentArrangement, Table};
 
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, confirm, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
+use crate::commands::{ensure_initialized, confirm, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
 use crate::error::{MyceliumError, Result};
 use crate::models::{FollowupStatus, Priority};
 
@@ -44,8 +44,15 @@ pub fn list(
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
+    // Reject conflicting flags BEFORE resolving so -o + -c doesn't silently
+    // resolve to "active".
+    if open && closed {
+        return Err(MyceliumError::InvalidInput(
+            "Cannot use -o and -c together — pick one".to_string(),
+        ));
+    }
+
     // Flag precedence: explicit --status wins, then -o/-c, then -a (default).
-    // Mutually exclusive flags collapse to the most specific one.
     let effective: Option<&str> = match (status, open, closed, all) {
         (Some(s), _, _, _) => Some(s),
         (None, true, false, _) => Some("active"),
@@ -53,12 +60,6 @@ pub fn list(
         // default OR explicit -a → all
         _ => Some("all"),
     };
-
-    if open && closed {
-        return Err(MyceliumError::InvalidInput(
-            "Cannot use -o and -c together — pick one".to_string(),
-        ));
-    }
 
     let db = ensure_initialized()?;
     let items = db.list_followups(effective)?;
@@ -230,7 +231,8 @@ pub fn append(id: i64, text: &str, quiet: bool) -> Result<()> {
         id: id.to_string(),
     })?;
 
-    let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+    // Include TZ offset so timestamps stay unambiguous across machines.
+    let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M %z");
     let new_body = if existing.body.trim().is_empty() {
         format!("[{}] {}", stamp, text)
     } else {
@@ -295,15 +297,12 @@ pub fn promote(
     let priority_enum: Priority = priority.parse()?;
 
     let new_title = fu.display_title();
-    let task_body = if fu.title.as_deref().map(|t| !t.is_empty()).unwrap_or(false) {
-        Some(fu.body.as_str())
-    } else {
-        None
-    };
-
+    // Always copy body into description so nothing is lost on promotion.
+    // When title is missing, display_title() already returns the truncated
+    // body — body becomes both title and description.
     let task = db.create_task(
         &new_title,
-        task_body,
+        Some(fu.body.as_str()),
         epic,
         priority_enum,
         None,
@@ -372,7 +371,3 @@ pub fn print_close_hint() {
     );
 }
 
-#[allow(dead_code)]
-fn _silence_error_prefix_unused() {
-    let _ = ERROR_PREFIX;
-}
