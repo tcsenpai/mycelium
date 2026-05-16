@@ -1229,18 +1229,26 @@ impl Database {
         }
     }
 
-    /// List follow-ups. If `status` is None, returns only open + in_progress
-    /// (i.e. "active"). Pass `Some("all")` to include closed ones.
+    /// List follow-ups. Filter semantics:
+    /// - None / `Some("all")` → every row
+    /// - `Some("active")` → open + in_progress
+    /// - `Some("closed")` → done + wontfix
+    /// - exact status string → that one bucket
     pub fn list_followups(&self, status: Option<&str>) -> Result<Vec<Followup>> {
         let (sql, want_filter): (&str, Option<String>) = match status {
-            None => (
+            None | Some("all") => (
+                "SELECT id, body, title, status, closure_reason, created_at, closed_at
+                 FROM followups ORDER BY id",
+                None,
+            ),
+            Some("active") => (
                 "SELECT id, body, title, status, closure_reason, created_at, closed_at
                  FROM followups WHERE status IN ('open', 'in_progress') ORDER BY id",
                 None,
             ),
-            Some("all") => (
+            Some("closed") => (
                 "SELECT id, body, title, status, closure_reason, created_at, closed_at
-                 FROM followups ORDER BY id",
+                 FROM followups WHERE status IN ('done', 'wontfix') ORDER BY id",
                 None,
             ),
             Some(other) => {

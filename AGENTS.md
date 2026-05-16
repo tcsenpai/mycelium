@@ -21,7 +21,7 @@ Hindsight bank named in `.bank` (do not edit by hand).
   `~/.claude/hindsight-memory.enabled`.
 <!-- hindsight-memory:end -->
 
-<!-- myc:agents-start v=2 -->
+<!-- myc:agents-start v=3 -->
 ## Project Management with Mycelium
 
 This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
@@ -100,9 +100,10 @@ myc followup add "body text"                # capture (body required)
 myc followup add "body text" --title "tag"  # optional short title
 myc fu add "short form alias works too"
 
-myc followup list                           # active (open + in_progress)
-myc followup list --all                     # everything
-myc followup list --status done             # specific status
+myc followup list                           # all (default)
+myc followup list -o                        # only active (open + in_progress)
+myc followup list -c                        # only closed (done + wontfix)
+myc followup list --status done             # exact status
 
 myc followup show <id>                      # full detail
 myc followup next                           # lowest-ID active (agent loop)

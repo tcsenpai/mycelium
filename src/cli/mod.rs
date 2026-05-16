@@ -89,15 +89,23 @@ pub enum FollowupCommands {
         title: Option<String>,
     },
 
-    /// List follow-ups (defaults to open + in_progress)
+    /// List follow-ups (defaults to all)
     List {
         /// Filter by exact status: open, in_progress, done, wontfix
         #[arg(short, long)]
         status: Option<String>,
 
-        /// Show all follow-ups regardless of status
-        #[arg(long)]
+        /// Show all follow-ups (default)
+        #[arg(short = 'a', long)]
         all: bool,
+
+        /// Show only active items (open + in_progress)
+        #[arg(short = 'o', long)]
+        open: bool,
+
+        /// Show only closed items (done + wontfix)
+        #[arg(short = 'c', long)]
+        closed: bool,
     },
 
     /// Show a follow-up

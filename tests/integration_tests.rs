@@ -325,13 +325,29 @@ fn test_followup_full_lifecycle() {
         .output().expect("add 2");
     assert!(out.status.success());
 
-    // list — should show 2 open
+    // list — default -a shows all (both visible)
     let out = myc_cmd(&temp)
         .args(["followup", "list", "--format", "json"])
         .output().expect("list");
     let json = String::from_utf8_lossy(&out.stdout);
     assert!(json.contains("\"id\": 1"));
     assert!(json.contains("\"id\": 2"));
+
+    // -o shows only active items (both open at this point)
+    let out = myc_cmd(&temp)
+        .args(["followup", "list", "-o", "--format", "json"])
+        .output().expect("list -o");
+    let json = String::from_utf8_lossy(&out.stdout);
+    assert!(json.contains("\"id\": 1"));
+    assert!(json.contains("\"id\": 2"));
+
+    // -c shows only closed items (none yet)
+    let out = myc_cmd(&temp)
+        .args(["followup", "list", "-c", "--format", "json"])
+        .output().expect("list -c");
+    let json = String::from_utf8_lossy(&out.stdout);
+    assert!(!json.contains("\"id\": 1"));
+    assert!(!json.contains("\"id\": 2"));
 
     // count
     let out = myc_cmd(&temp)
@@ -370,6 +386,20 @@ fn test_followup_full_lifecycle() {
         .args(["followup", "next", "--format", "json"])
         .output().expect("next");
     let body = String::from_utf8_lossy(&out.stdout);
+    assert!(body.contains("\"id\": 2"));
+
+    // -c now shows #1 (done), -o shows #2 (open)
+    let out = myc_cmd(&temp)
+        .args(["followup", "list", "-c", "--format", "json"])
+        .output().expect("list -c");
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(body.contains("\"id\": 1"));
+    assert!(!body.contains("\"id\": 2"));
+    let out = myc_cmd(&temp)
+        .args(["followup", "list", "-o", "--format", "json"])
+        .output().expect("list -o");
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(!body.contains("\"id\": 1"));
     assert!(body.contains("\"id\": 2"));
 
     // wontfix #2

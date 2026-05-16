@@ -220,9 +220,10 @@ epic/priority/deps. Body is required, title optional. Statuses:
 myc followup add "body text" [--title "tag"]    # capture
 myc fu add "short form alias works"
 
-myc followup list                               # active items
-myc followup list --all                         # everything
-myc followup list --status done                 # by status
+myc followup list                               # all items (default, alias -a)
+myc followup list -o                            # only active (open + in_progress)
+myc followup list -c                            # only closed (done + wontfix)
+myc followup list --status done                 # exact status bucket
 myc followup show <id>
 myc followup next                               # lowest-ID active
 

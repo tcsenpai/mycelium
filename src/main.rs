@@ -189,8 +189,8 @@ fn main() {
             FollowupCommands::Add { body, title } => {
                 commands::followup::add(&body, title.as_deref(), &cli.format, cli.quiet)
             }
-            FollowupCommands::List { status, all } => {
-                commands::followup::list(status.as_deref(), all, &cli.format, cli.quiet)
+            FollowupCommands::List { status, all, open, closed } => {
+                commands::followup::list(status.as_deref(), all, open, closed, &cli.format, cli.quiet)
             }
             FollowupCommands::Show { id } => {
                 commands::followup::show(id, &cli.format, cli.quiet)

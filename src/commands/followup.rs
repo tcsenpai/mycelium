@@ -36,9 +36,31 @@ pub fn add(body: &str, title: Option<&str>, format: &OutputFormat, quiet: bool) 
     Ok(())
 }
 
-pub fn list(status: Option<&str>, all: bool, format: &OutputFormat, quiet: bool) -> Result<()> {
+pub fn list(
+    status: Option<&str>,
+    all: bool,
+    open: bool,
+    closed: bool,
+    format: &OutputFormat,
+    quiet: bool,
+) -> Result<()> {
+    // Flag precedence: explicit --status wins, then -o/-c, then -a (default).
+    // Mutually exclusive flags collapse to the most specific one.
+    let effective: Option<&str> = match (status, open, closed, all) {
+        (Some(s), _, _, _) => Some(s),
+        (None, true, false, _) => Some("active"),
+        (None, false, true, _) => Some("closed"),
+        // default OR explicit -a → all
+        _ => Some("all"),
+    };
+
+    if open && closed {
+        return Err(MyceliumError::InvalidInput(
+            "Cannot use -o and -c together — pick one".to_string(),
+        ));
+    }
+
     let db = ensure_initialized()?;
-    let effective = if all { Some("all") } else { status };
     let items = db.list_followups(effective)?;
 
     match format {

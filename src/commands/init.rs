@@ -7,7 +7,7 @@ use crate::error::Result;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 2;
+const AGENTS_MD_VERSION: u32 = 3;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -90,9 +90,10 @@ myc followup add "body text"                # capture (body required)
 myc followup add "body text" --title "tag"  # optional short title
 myc fu add "short form alias works too"
 
-myc followup list                           # active (open + in_progress)
-myc followup list --all                     # everything
-myc followup list --status done             # specific status
+myc followup list                           # all (default)
+myc followup list -o                        # only active (open + in_progress)
+myc followup list -c                        # only closed (done + wontfix)
+myc followup list --status done             # exact status
 
 myc followup show <id>                      # full detail
 myc followup next                           # lowest-ID active (agent loop)
