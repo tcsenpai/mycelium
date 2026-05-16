@@ -5,6 +5,12 @@ use crate::commands::{SUCCESS_PREFIX, INFO_PREFIX};
 use crate::db::Database;
 use crate::error::Result;
 
+/// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
+/// without --force only updates when the embedded marker version differs.
+const AGENTS_MD_VERSION: u32 = 2;
+const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
+const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
+
 const AGENTS_MD_CONTENT: &str = r#"
 ## Project Management with Mycelium
 
@@ -72,6 +78,56 @@ git add .mycelium/
 git commit -m "Add mycelium project tracking"
 ```
 
+### Follow-ups (`myc followup`, alias `myc fu`)
+
+Lightweight scratch table for non-blocking "oh-by-the-way" items
+captured mid-work — bugs, questions, ideas, things the user should look
+at later. **Separate from tasks** (no epic/priority/deps/assignee). Most
+follow-ups are resolved by the user, not the agent.
+
+```bash
+myc followup add "body text"                # capture (body required)
+myc followup add "body text" --title "tag"  # optional short title
+myc fu add "short form alias works too"
+
+myc followup list                           # active (open + in_progress)
+myc followup list --all                     # everything
+myc followup list --status done             # specific status
+
+myc followup show <id>                      # full detail
+myc followup next                           # lowest-ID active (agent loop)
+myc followup count                          # JSON: {open, in_progress, done, wontfix}
+
+myc followup start <id>                     # → in_progress
+myc followup done <id> [--reason "..."]     # → done
+myc followup wontfix <id> [--reason "..."]  # → wontfix
+myc followup reopen <id>                    # → open
+
+myc followup edit <id> --body "new body" [--title -|"new title"]
+myc followup append <id> "more context"     # timestamped, preserves existing
+myc followup rm <id> [--force]
+myc followup promote <id> [--epic N] [--priority high]  # convert to task
+```
+
+**Agent rule — end-of-task follow-up check** (MANDATORY)
+
+At the end of every mycelium-tracked unit of work (closing a task,
+finishing a user-requested change that touched myc state), the agent
+MUST:
+
+1. Run `myc followup list --format json` (or `myc followup count
+   --format json`).
+2. If `active > 0`, surface them to the user before wrapping:
+   > "Before we wrap — N open follow-up(s): [titles/bodies]. Want me to
+   > handle any now, or leave for later?"
+3. **Never silently process them.** Always ask.
+
+`myc task close` itself also prints a one-line reminder, but the agent
+should still proactively check.
+
+Use `myc followup add` during work to capture anything you notice but
+shouldn't act on right now.
+
 ### For AI Agents
 
 When working on this project:
@@ -79,8 +135,10 @@ When working on this project:
 1. Check existing tasks: `myc task list`
 2. Check blocked tasks: `myc task list --blocked`
 3. Create tasks for new work: `myc task create --title "..." --description "..." --epic N`
-4. Mark tasks complete when done: `myc task close N`
-5. Use `--format json` for machine-readable output: `myc task list --format json`
+4. Capture incidental observations as follow-ups: `myc followup add "..."`
+5. At end of task: `myc followup list` and surface open ones to the user
+6. Mark tasks complete when done: `myc task close N`
+7. Use `--format json` for machine-readable output: `myc task list --format json`
 
 ## Mental Frameworks for Mycelium Usage
 
@@ -171,18 +229,14 @@ pub fn execute(force_init: bool) -> Result<()> {
 
     // Create AGENTS.md if it doesn't exist
     if !agents_md_path.exists() {
-        fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
+        fs::write(&agents_md_path, format!("# Agent Instructions\n{}", marker_block()))?;
         println!("{} Created AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
     } else {
         let existing = fs::read_to_string(&agents_md_path)?;
-        if !existing.contains("## Project Management with Mycelium") {
-            let cleaned = remove_mycelium_section(&existing);
-            if cleaned.trim().is_empty() {
-                fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
-            } else {
-                fs::write(&agents_md_path, format!("{}\n{}", cleaned.trim_end(), AGENTS_MD_CONTENT))?;
-            }
-            println!("{} Updated AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
+        let result = apply_marker_block(&existing, false);
+        if let Some((updated, action)) = result {
+            fs::write(&agents_md_path, updated)?;
+            println!("{} {} AGENTS.md mycelium block", INFO_PREFIX.blue(), action);
         }
     }
 
@@ -194,38 +248,132 @@ pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let agents_md_path = path.map(|p| cwd.join(p)).unwrap_or_else(|| cwd.join("AGENTS.md"));
 
-    if agents_md_path.exists() && !force {
-        let existing = fs::read_to_string(&agents_md_path)?;
-        if existing.contains("## Project Management with Mycelium") {
-            println!("{} AGENTS.md already contains Mycelium instructions (use --force to regenerate)", INFO_PREFIX.blue());
-            return Ok(());
+    if !agents_md_path.exists() {
+        fs::write(&agents_md_path, format!("# Agent Instructions\n{}", marker_block()))?;
+        println!("{} Created AGENTS.md with mycelium instructions (v{})", SUCCESS_PREFIX.green(), AGENTS_MD_VERSION);
+        return Ok(());
+    }
+
+    let existing = fs::read_to_string(&agents_md_path)?;
+    match apply_marker_block(&existing, force) {
+        Some((updated, action)) => {
+            fs::write(&agents_md_path, updated)?;
+            println!(
+                "{} {} AGENTS.md mycelium block (v{})",
+                SUCCESS_PREFIX.green(), action, AGENTS_MD_VERSION
+            );
         }
-        let cleaned = remove_mycelium_section(&existing);
-        if cleaned.trim().is_empty() {
-            fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
-        } else {
-            fs::write(&agents_md_path, format!("{}\n{}", cleaned.trim_end(), AGENTS_MD_CONTENT))?;
+        None => {
+            println!(
+                "{} AGENTS.md mycelium block already at v{} — no change (use --force to regenerate)",
+                INFO_PREFIX.blue(), AGENTS_MD_VERSION
+            );
         }
-        println!("{} Updated AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
-    } else if agents_md_path.exists() {
-        let existing = fs::read_to_string(&agents_md_path)?;
-        let cleaned = remove_mycelium_section(&existing);
-        if cleaned.trim().is_empty() {
-            fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
-        } else {
-            fs::write(&agents_md_path, format!("{}\n{}", cleaned.trim_end(), AGENTS_MD_CONTENT))?;
-        }
-        println!("{} Regenerated AGENTS.md with mycelium instructions", SUCCESS_PREFIX.green());
-    } else {
-        fs::write(&agents_md_path, format!("# Agent Instructions\n{}", AGENTS_MD_CONTENT))?;
-        println!("{} Created AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
     }
 
     Ok(())
 }
 
-/// Remove the Mycelium section from AGENTS.md content so it can be regenerated.
-fn remove_mycelium_section(content: &str) -> String {
+/// Build the wrapped marker block with embedded version.
+fn marker_block() -> String {
+    format!(
+        "\n{} v={} -->\n{}\n{}\n",
+        AGENTS_MARKER_START,
+        AGENTS_MD_VERSION,
+        AGENTS_MD_CONTENT.trim(),
+        AGENTS_MARKER_END,
+    )
+}
+
+/// Locate `(start_line_index, end_line_index_inclusive, embedded_version)` for
+/// the mycelium marker block in `content`. None if no markers.
+fn find_marker_block(content: &str) -> Option<(usize, usize, Option<u32>)> {
+    let mut start = None;
+    let mut end = None;
+    let mut version = None;
+    for (idx, line) in content.lines().enumerate() {
+        if line.contains(AGENTS_MARKER_START) {
+            start = Some(idx);
+            // parse v=N
+            if let Some(v_pos) = line.find("v=") {
+                let rest = &line[v_pos + 2..];
+                let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(n) = num.parse::<u32>() {
+                    version = Some(n);
+                }
+            }
+        }
+        if line.contains(AGENTS_MARKER_END) && start.is_some() {
+            end = Some(idx);
+            break;
+        }
+    }
+    match (start, end) {
+        (Some(s), Some(e)) if e >= s => Some((s, e, version)),
+        _ => None,
+    }
+}
+
+/// Returns (new_content, action) when a write is needed, or None when no change.
+/// `force=true` always replaces the block (and migrates legacy unmarked content).
+fn apply_marker_block(existing: &str, force: bool) -> Option<(String, &'static str)> {
+    if let Some((s, e, ver)) = find_marker_block(existing) {
+        // Markers present
+        if !force && ver == Some(AGENTS_MD_VERSION) {
+            return None;
+        }
+        let lines: Vec<&str> = existing.lines().collect();
+        let before = lines[..s].join("\n");
+        let after = if e + 1 < lines.len() {
+            lines[e + 1..].join("\n")
+        } else {
+            String::new()
+        };
+        let mut out = String::new();
+        if !before.is_empty() {
+            out.push_str(&before);
+            out.push('\n');
+        }
+        out.push_str(marker_block().trim_start_matches('\n'));
+        if !after.is_empty() {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(&after);
+        }
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        let action = if ver.is_none() {
+            "Wrapped"
+        } else if ver == Some(AGENTS_MD_VERSION) {
+            "Regenerated"
+        } else {
+            "Upgraded"
+        };
+        Some((out, action))
+    } else {
+        // Legacy file (no markers). Migrate: strip old heuristic-detected
+        // sections, then append marker block.
+        let cleaned = remove_mycelium_section_legacy(existing);
+        let trimmed = cleaned.trim_end();
+        let new_content = if trimmed.is_empty() {
+            format!("# Agent Instructions\n{}", marker_block())
+        } else {
+            format!("{}\n{}", trimmed, marker_block())
+        };
+        if new_content == existing {
+            None
+        } else {
+            Some((new_content, "Migrated to marker-block"))
+        }
+    }
+}
+
+/// Legacy heuristic: strip `## Project Management with Mycelium` and
+/// `## Mental Frameworks for Mycelium Usage` sections. Only used during
+/// one-time migration from pre-marker AGENTS.md files.
+fn remove_mycelium_section_legacy(content: &str) -> String {
     let mut result = String::new();
     let mut in_mycelium_section = false;
 
@@ -234,7 +382,6 @@ fn remove_mycelium_section(content: &str) -> String {
             in_mycelium_section = true;
             continue;
         }
-        // A new H2 that isn't part of Mycelium ends the skip
         if in_mycelium_section && line.starts_with("## ") && !line.contains("Mental Frameworks for Mycelium") {
             in_mycelium_section = false;
         }
@@ -245,4 +392,70 @@ fn remove_mycelium_section(content: &str) -> String {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_run_wraps_legacy_unmarked_file() {
+        let original = "# Agent Instructions\n\n## Other Project Notes\n\nKeep these.\n\n## Project Management with Mycelium\n\nOld content.\n\n## Mental Frameworks for Mycelium Usage\n\nOld frameworks.\n";
+        let (updated, action) = apply_marker_block(original, false).expect("should update");
+        assert_eq!(action, "Migrated to marker-block");
+        assert!(updated.contains("## Other Project Notes"));
+        assert!(updated.contains("Keep these"));
+        assert!(updated.contains(AGENTS_MARKER_START));
+        assert!(updated.contains(AGENTS_MARKER_END));
+        // Old content gone
+        assert!(!updated.contains("Old content"));
+        assert!(!updated.contains("Old frameworks"));
+    }
+
+    #[test]
+    fn no_change_when_marker_at_current_version() {
+        let original = format!(
+            "# Agent Instructions\n\n## Other\n\nfoo\n\n{} v={} -->\nhello\n{}\n",
+            AGENTS_MARKER_START, AGENTS_MD_VERSION, AGENTS_MARKER_END
+        );
+        assert!(apply_marker_block(&original, false).is_none());
+    }
+
+    #[test]
+    fn upgrade_when_version_differs() {
+        let original = format!(
+            "# Agent Instructions\n\n## Other\n\nfoo\n\n{} v=1 -->\nold block\n{}\n",
+            AGENTS_MARKER_START, AGENTS_MARKER_END
+        );
+        let (updated, action) = apply_marker_block(&original, false).expect("should update");
+        assert_eq!(action, "Upgraded");
+        assert!(updated.contains("## Other"));
+        assert!(updated.contains("foo"));
+        assert!(!updated.contains("old block"));
+        assert!(updated.contains(&format!("v={}", AGENTS_MD_VERSION)));
+    }
+
+    #[test]
+    fn force_regenerates_same_version() {
+        let original = format!(
+            "{} v={} -->\nstale body\n{}\n",
+            AGENTS_MARKER_START, AGENTS_MD_VERSION, AGENTS_MARKER_END
+        );
+        let (updated, action) = apply_marker_block(&original, true).expect("should update");
+        assert_eq!(action, "Regenerated");
+        assert!(!updated.contains("stale body"));
+    }
+
+    #[test]
+    fn preserves_user_content_outside_markers() {
+        let original = format!(
+            "# Custom Header\n\n## Pre-existing section\n\nSome user notes.\n\n{} v=1 -->\nold\n{}\n\n## Post section\n\nMore notes.\n",
+            AGENTS_MARKER_START, AGENTS_MARKER_END
+        );
+        let (updated, _) = apply_marker_block(&original, false).expect("should update");
+        assert!(updated.contains("Some user notes"));
+        assert!(updated.contains("More notes"));
+        assert!(updated.contains("## Pre-existing section"));
+        assert!(updated.contains("## Post section"));
+    }
 }

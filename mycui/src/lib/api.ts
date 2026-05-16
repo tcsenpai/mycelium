@@ -1,5 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Task, Epic, Assignee, DashboardStats, TaskFilters } from './types';
+import type {
+  Task,
+  Epic,
+  Assignee,
+  DashboardStats,
+  TaskFilters,
+  Followup,
+  FollowupCounts,
+  FollowupStatus,
+} from './types';
 
 export type TaskUpdateInput = {
   title?: string;
@@ -61,7 +70,11 @@ export async function deleteTask(id: number): Promise<void> {
 }
 
 export async function closeTask(id: number): Promise<Task> {
-  return invoke('close_task', { id });
+  return await invoke('close_task', { id });
+}
+
+export async function startTask(id: number): Promise<Task> {
+  return await invoke('start_task', { id });
 }
 
 export async function reopenTask(id: number): Promise<Task> {
@@ -110,4 +123,50 @@ export async function searchTasks(query: string): Promise<Task[]> {
 
 export async function getAllTags(): Promise<string[]> {
   return invoke('get_all_tags');
+}
+
+// Follow-ups
+
+export async function listFollowups(includeClosed = false): Promise<Followup[]> {
+  return invoke('list_followups', { includeClosed });
+}
+
+export async function getFollowup(id: number): Promise<Followup | null> {
+  return invoke('get_followup', { id });
+}
+
+export async function createFollowup(followup: { body: string; title?: string }): Promise<Followup> {
+  return invoke('create_followup', { followup });
+}
+
+export async function setFollowupStatus(
+  id: number,
+  status: FollowupStatus,
+  reason?: string,
+): Promise<Followup> {
+  return invoke('set_followup_status', { id, status, reason });
+}
+
+export async function updateFollowup(
+  id: number,
+  body?: string,
+  title?: string | null,
+): Promise<Followup> {
+  // title === undefined means leave alone; null means clear; string means set
+  const payload: { id: number; body?: string; title?: string | null | undefined } = { id };
+  if (body !== undefined) payload.body = body;
+  if (title !== undefined) payload.title = title;
+  return invoke('update_followup', payload);
+}
+
+export async function appendFollowup(id: number, text: string): Promise<Followup> {
+  return invoke('append_followup', { id, text });
+}
+
+export async function deleteFollowup(id: number): Promise<void> {
+  return invoke('delete_followup', { id });
+}
+
+export async function countFollowups(): Promise<FollowupCounts> {
+  return invoke('count_followups');
 }

@@ -1183,6 +1183,249 @@ impl Database {
         let count = self.conn.execute("DELETE FROM tasks WHERE epic_id IS NULL", [])?;
         Ok(count)
     }
+
+    // Follow-up operations
+
+    pub fn create_followup(&mut self, body: &str, title: Option<&str>) -> Result<Followup> {
+        let now = chrono::Local::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO followups (body, title, status, created_at) VALUES (?1, ?2, 'open', ?3)",
+            (body, title, &now),
+        )?;
+        let id = self.conn.last_insert_rowid();
+        self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })
+    }
+
+    pub fn get_followup(&self, id: i64) -> Result<Option<Followup>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, body, title, status, closure_reason, created_at, closed_at
+             FROM followups WHERE id = ?1"
+        )?;
+
+        let row = stmt.query_row([id], |row| {
+            let closed_at: Option<String> = row.get(6)?;
+            Ok(Followup {
+                id: row.get(0)?,
+                body: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get::<_, String>(3)?.parse().map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0, rusqlite::types::Type::Text, Box::new(e),
+                    )
+                })?,
+                closure_reason: row.get(4)?,
+                created_at: parse_timestamp(&row.get::<_, String>(5)?)?,
+                closed_at: closed_at.as_deref().map(parse_timestamp).transpose()?,
+            })
+        });
+
+        match row {
+            Ok(f) => Ok(Some(f)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// List follow-ups. If `status` is None, returns only open + in_progress
+    /// (i.e. "active"). Pass `Some("all")` to include closed ones.
+    pub fn list_followups(&self, status: Option<&str>) -> Result<Vec<Followup>> {
+        let (sql, want_filter): (&str, Option<String>) = match status {
+            None => (
+                "SELECT id, body, title, status, closure_reason, created_at, closed_at
+                 FROM followups WHERE status IN ('open', 'in_progress') ORDER BY id",
+                None,
+            ),
+            Some("all") => (
+                "SELECT id, body, title, status, closure_reason, created_at, closed_at
+                 FROM followups ORDER BY id",
+                None,
+            ),
+            Some(other) => {
+                let parsed: FollowupStatus = other.parse()?;
+                (
+                    "SELECT id, body, title, status, closure_reason, created_at, closed_at
+                     FROM followups WHERE status = ?1 ORDER BY id",
+                    Some(parsed.as_str().to_string()),
+                )
+            }
+        };
+
+        let mut stmt = self.conn.prepare(sql)?;
+        let map_row = |row: &rusqlite::Row| -> rusqlite::Result<Followup> {
+            let closed_at: Option<String> = row.get(6)?;
+            Ok(Followup {
+                id: row.get(0)?,
+                body: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get::<_, String>(3)?.parse().map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0, rusqlite::types::Type::Text, Box::new(e),
+                    )
+                })?,
+                closure_reason: row.get(4)?,
+                created_at: parse_timestamp(&row.get::<_, String>(5)?)?,
+                closed_at: closed_at.as_deref().map(parse_timestamp).transpose()?,
+            })
+        };
+
+        let rows = if let Some(s) = want_filter {
+            stmt.query_map([s], map_row)?.collect::<std::result::Result<Vec<_>, _>>()
+        } else {
+            stmt.query_map([], map_row)?.collect::<std::result::Result<Vec<_>, _>>()
+        };
+        rows.map_err(|e| e.into())
+    }
+
+    /// Lowest-id active follow-up (open or in_progress). Agent loop primitive.
+    pub fn next_followup(&self) -> Result<Option<Followup>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, body, title, status, closure_reason, created_at, closed_at
+             FROM followups WHERE status IN ('open', 'in_progress') ORDER BY id LIMIT 1"
+        )?;
+
+        let row = stmt.query_row([], |row| {
+            let closed_at: Option<String> = row.get(6)?;
+            Ok(Followup {
+                id: row.get(0)?,
+                body: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get::<_, String>(3)?.parse().map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0, rusqlite::types::Type::Text, Box::new(e),
+                    )
+                })?,
+                closure_reason: row.get(4)?,
+                created_at: parse_timestamp(&row.get::<_, String>(5)?)?,
+                closed_at: closed_at.as_deref().map(parse_timestamp).transpose()?,
+            })
+        });
+
+        match row {
+            Ok(f) => Ok(Some(f)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn update_followup_status(
+        &mut self,
+        id: i64,
+        new_status: FollowupStatus,
+        closure_reason: Option<&str>,
+    ) -> Result<Followup> {
+        let existing = self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })?;
+
+        let now = chrono::Local::now().to_rfc3339();
+        let closed_at: Option<String> = if new_status.is_open() {
+            None
+        } else if existing.closed_at.is_some() && existing.status == new_status {
+            existing.closed_at.map(|t| t.to_rfc3339())
+        } else {
+            Some(now)
+        };
+
+        let reason: Option<String> = match new_status {
+            FollowupStatus::Wontfix => closure_reason.map(|s| s.to_string()),
+            FollowupStatus::Done => closure_reason.map(|s| s.to_string()),
+            _ => None,
+        };
+
+        self.conn.execute(
+            "UPDATE followups SET status = ?1, closure_reason = ?2, closed_at = ?3 WHERE id = ?4",
+            (new_status.as_str(), reason.as_deref(), closed_at.as_deref(), id),
+        )?;
+
+        self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })
+    }
+
+    pub fn update_followup_body(
+        &mut self,
+        id: i64,
+        body: Option<&str>,
+        title: Option<&str>,
+        clear_title: bool,
+    ) -> Result<Followup> {
+        let existing = self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })?;
+
+        let new_body = body.unwrap_or(&existing.body);
+        let new_title: Option<String> = if clear_title {
+            None
+        } else if let Some(t) = title {
+            Some(t.to_string())
+        } else {
+            existing.title.clone()
+        };
+
+        self.conn.execute(
+            "UPDATE followups SET body = ?1, title = ?2 WHERE id = ?3",
+            (new_body, new_title.as_deref(), id),
+        )?;
+
+        self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })
+    }
+
+    pub fn delete_followup(&mut self, id: i64) -> Result<()> {
+        let count = self.conn.execute("DELETE FROM followups WHERE id = ?1", [id])?;
+        if count == 0 {
+            return Err(MyceliumError::NotFound {
+                entity: "followup".to_string(),
+                id: id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// (open_count, in_progress_count, done_count, wontfix_count)
+    pub fn count_followups(&self) -> Result<FollowupCounts> {
+        let mut stmt = self.conn.prepare(
+            "SELECT status, COUNT(*) FROM followups GROUP BY status"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+
+        let mut counts = FollowupCounts::default();
+        for r in rows {
+            let (status, n) = r?;
+            match status.as_str() {
+                "open" => counts.open = n,
+                "in_progress" => counts.in_progress = n,
+                "done" => counts.done = n,
+                "wontfix" => counts.wontfix = n,
+                _ => {}
+            }
+        }
+        Ok(counts)
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct FollowupCounts {
+    pub open: i64,
+    pub in_progress: i64,
+    pub done: i64,
+    pub wontfix: i64,
+}
+
+impl FollowupCounts {
+    pub fn active(&self) -> i64 {
+        self.open + self.in_progress
+    }
 }
 
 #[derive(Debug, Clone)]

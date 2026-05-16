@@ -71,6 +71,125 @@ pub enum Commands {
     /// Linear integration (bidirectional sync)
     #[command(subcommand)]
     Linear(LinearCommands),
+
+    /// Manage follow-ups (lightweight "oh-by-the-way" items)
+    #[command(subcommand, alias = "fu")]
+    Followup(FollowupCommands),
+}
+
+#[derive(Subcommand)]
+pub enum FollowupCommands {
+    /// Add a follow-up (body required, title optional)
+    Add {
+        /// Follow-up body (required)
+        body: String,
+
+        /// Optional title (defaults to first 60 chars of body)
+        #[arg(short, long)]
+        title: Option<String>,
+    },
+
+    /// List follow-ups (defaults to open + in_progress)
+    List {
+        /// Filter by exact status: open, in_progress, done, wontfix
+        #[arg(short, long)]
+        status: Option<String>,
+
+        /// Show all follow-ups regardless of status
+        #[arg(long)]
+        all: bool,
+    },
+
+    /// Show a follow-up
+    Show {
+        /// Follow-up ID
+        id: i64,
+    },
+
+    /// Pull the lowest-ID active follow-up (agent loop primitive)
+    Next,
+
+    /// Mark a follow-up as in_progress
+    Start {
+        /// Follow-up ID
+        id: i64,
+    },
+
+    /// Mark a follow-up as done
+    Done {
+        /// Follow-up ID
+        id: i64,
+
+        /// Optional closure reason
+        #[arg(short, long)]
+        reason: Option<String>,
+    },
+
+    /// Mark a follow-up as wontfix
+    Wontfix {
+        /// Follow-up ID
+        id: i64,
+
+        /// Optional closure reason
+        #[arg(short, long)]
+        reason: Option<String>,
+    },
+
+    /// Reopen a follow-up
+    Reopen {
+        /// Follow-up ID
+        id: i64,
+    },
+
+    /// Replace body or title of a follow-up
+    Edit {
+        /// Follow-up ID
+        id: i64,
+
+        /// New body (omit to keep current)
+        #[arg(short, long)]
+        body: Option<String>,
+
+        /// New title (use `-` to clear, omit to keep current)
+        #[arg(short, long)]
+        title: Option<String>,
+    },
+
+    /// Append text to a follow-up's body (timestamped, preserves existing)
+    Append {
+        /// Follow-up ID
+        id: i64,
+
+        /// Text to append
+        text: String,
+    },
+
+    /// Delete a follow-up
+    Rm {
+        /// Follow-up ID
+        id: i64,
+
+        /// Skip confirmation
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Promote a follow-up to a full task (marks follow-up done)
+    Promote {
+        /// Follow-up ID
+        id: i64,
+
+        /// Epic ID to assign the new task to
+        #[arg(short, long)]
+        epic: Option<i64>,
+
+        /// Priority (low, medium, high, critical)
+        #[arg(short, long, default_value = "medium")]
+        priority: String,
+    },
+
+    /// Show counts (great for end-of-task agent checks)
+    Count,
 }
 
 #[derive(Subcommand)]

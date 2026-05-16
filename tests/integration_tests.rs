@@ -306,3 +306,143 @@ fn test_delete_epic_detaches_tasks_instead_of_deleting_them() {
     assert!(stdout.contains("\"id\": 1"));
     assert!(stdout.contains("\"epic_id\": null"));
 }
+
+#[test]
+fn test_followup_full_lifecycle() {
+    let temp = TempDir::new().unwrap();
+    let _ = myc_cmd(&temp).arg("init").output().expect("init");
+
+    // add (with title)
+    let out = myc_cmd(&temp)
+        .args(["followup", "add", "first body text", "--title", "first"])
+        .output().expect("add");
+    print_output(&out);
+    assert!(out.status.success());
+
+    // add (no title, alias `fu`)
+    let out = myc_cmd(&temp)
+        .args(["fu", "add", "second body, no title"])
+        .output().expect("add 2");
+    assert!(out.status.success());
+
+    // list — should show 2 open
+    let out = myc_cmd(&temp)
+        .args(["followup", "list", "--format", "json"])
+        .output().expect("list");
+    let json = String::from_utf8_lossy(&out.stdout);
+    assert!(json.contains("\"id\": 1"));
+    assert!(json.contains("\"id\": 2"));
+
+    // count
+    let out = myc_cmd(&temp)
+        .args(["followup", "count", "--format", "json"])
+        .output().expect("count");
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(body.contains("\"open\": 2"));
+
+    // append
+    let out = myc_cmd(&temp)
+        .args(["followup", "append", "1", "extra context"])
+        .output().expect("append");
+    assert!(out.status.success());
+    let out = myc_cmd(&temp)
+        .args(["followup", "show", "1", "--format", "json"])
+        .output().expect("show");
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(body.contains("extra context"));
+
+    // edit replace
+    let out = myc_cmd(&temp)
+        .args(["followup", "edit", "1", "--body", "fully replaced"])
+        .output().expect("edit");
+    assert!(out.status.success());
+
+    // start + done
+    let out = myc_cmd(&temp).args(["followup", "start", "1"]).output().expect("start");
+    assert!(out.status.success());
+    let out = myc_cmd(&temp)
+        .args(["followup", "done", "1", "--reason", "tested"])
+        .output().expect("done");
+    assert!(out.status.success());
+
+    // next should now return #2 (only remaining open)
+    let out = myc_cmd(&temp)
+        .args(["followup", "next", "--format", "json"])
+        .output().expect("next");
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(body.contains("\"id\": 2"));
+
+    // wontfix #2
+    let out = myc_cmd(&temp)
+        .args(["followup", "wontfix", "2", "--reason", "scope creep"])
+        .output().expect("wontfix");
+    assert!(out.status.success());
+
+    // next should be null now
+    let out = myc_cmd(&temp)
+        .args(["followup", "next", "--format", "json"])
+        .output().expect("next empty");
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(body.trim().starts_with("null"));
+
+    // reopen #2
+    let out = myc_cmd(&temp).args(["followup", "reopen", "2"]).output().expect("reopen");
+    assert!(out.status.success());
+
+    // rm with --force
+    let out = myc_cmd(&temp)
+        .args(["followup", "rm", "2", "--force"])
+        .output().expect("rm");
+    assert!(out.status.success());
+}
+
+#[test]
+fn test_followup_promote_to_task() {
+    let temp = TempDir::new().unwrap();
+    let _ = myc_cmd(&temp).arg("init").output().expect("init");
+
+    let _ = myc_cmd(&temp)
+        .args(["followup", "add", "should become a real task", "--title", "Real work"])
+        .output().expect("add");
+
+    let out = myc_cmd(&temp)
+        .args(["followup", "promote", "1", "--priority", "high"])
+        .output().expect("promote");
+    print_output(&out);
+    assert!(out.status.success());
+
+    // Followup should now be done
+    let out = myc_cmd(&temp)
+        .args(["followup", "show", "1", "--format", "json"])
+        .output().expect("show fu");
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(body.contains("\"status\": \"done\""));
+    assert!(body.contains("Promoted to task #1"));
+
+    // Task should exist with the title
+    let out = myc_cmd(&temp)
+        .args(["task", "show", "1", "--format", "json"])
+        .output().expect("show task");
+    let body = String::from_utf8_lossy(&out.stdout);
+    assert!(body.contains("\"title\": \"Real work\""));
+    assert!(body.contains("\"priority\": \"high\""));
+}
+
+#[test]
+fn test_followup_close_hint_fires() {
+    let temp = TempDir::new().unwrap();
+    let _ = myc_cmd(&temp).arg("init").output().expect("init");
+    let _ = myc_cmd(&temp)
+        .args(["task", "create", "--title", "Some task"])
+        .output().expect("task create");
+    let _ = myc_cmd(&temp)
+        .args(["followup", "add", "something to look at later"])
+        .output().expect("fu add");
+
+    let out = myc_cmd(&temp)
+        .args(["task", "close", "1"])
+        .output().expect("task close");
+    print_output(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("open follow-up"));
+}

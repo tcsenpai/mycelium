@@ -7,7 +7,7 @@ mod error;
 mod linear;
 mod models;
 
-use cli::{Cli, Commands, EpicCommands, TaskCommands, AssigneeCommands, DepsCommands, ExportCommands, LinkCommands, BatchOpCommands, LinearCommands};
+use cli::{Cli, Commands, EpicCommands, TaskCommands, AssigneeCommands, DepsCommands, ExportCommands, LinkCommands, BatchOpCommands, LinearCommands, FollowupCommands};
 use error::handle_error;
 
 pub use commands::{ERROR_PREFIX, SUCCESS_PREFIX, INFO_PREFIX, WARNING_PREFIX};
@@ -182,6 +182,50 @@ fn main() {
             }
             LinearCommands::Unlink => {
                 commands::linear::unlink_cmd(cli.quiet)
+            }
+        }
+
+        Commands::Followup(cmd) => match cmd {
+            FollowupCommands::Add { body, title } => {
+                commands::followup::add(&body, title.as_deref(), &cli.format, cli.quiet)
+            }
+            FollowupCommands::List { status, all } => {
+                commands::followup::list(status.as_deref(), all, &cli.format, cli.quiet)
+            }
+            FollowupCommands::Show { id } => {
+                commands::followup::show(id, &cli.format, cli.quiet)
+            }
+            FollowupCommands::Next => {
+                commands::followup::next(&cli.format, cli.quiet)
+            }
+            FollowupCommands::Start { id } => {
+                commands::followup::set_status(id, models::FollowupStatus::InProgress, None, cli.quiet)
+            }
+            FollowupCommands::Done { id, reason } => {
+                commands::followup::set_status(id, models::FollowupStatus::Done, reason.as_deref(), cli.quiet)
+            }
+            FollowupCommands::Wontfix { id, reason } => {
+                commands::followup::set_status(id, models::FollowupStatus::Wontfix, reason.as_deref(), cli.quiet)
+            }
+            FollowupCommands::Reopen { id } => {
+                commands::followup::set_status(id, models::FollowupStatus::Open, None, cli.quiet)
+            }
+            FollowupCommands::Edit { id, body, title } => {
+                let clear_title = title.as_deref() == Some("-");
+                let title_arg = if clear_title { None } else { title.as_deref() };
+                commands::followup::edit(id, body.as_deref(), title_arg, clear_title, cli.quiet)
+            }
+            FollowupCommands::Append { id, text } => {
+                commands::followup::append(id, &text, cli.quiet)
+            }
+            FollowupCommands::Rm { id, force } => {
+                commands::followup::remove(id, force, cli.quiet)
+            }
+            FollowupCommands::Promote { id, epic, priority } => {
+                commands::followup::promote(id, epic, &priority, cli.quiet)
+            }
+            FollowupCommands::Count => {
+                commands::followup::count(&cli.format, cli.quiet)
             }
         }
     };

@@ -1,5 +1,27 @@
 # Agent Instructions
 
+## Memory: Hindsight bank
+
+This repo uses the `hindsight-memory` skill. Project memory lives in the
+Hindsight bank named in `.bank` (do not edit by hand).
+
+- Recall against the project bank AND `coding-knowledge` at the start of
+  relevant tasks (parallel calls).
+- Retain learnings as atomic, self-contained, clear memories tagged
+  `user`/`feedback`/`project`/`reference`.
+- Cross-project rules go in `coding-knowledge` as memories tagged
+  `coding-rule` (not as directives — directives are not recallable).
+- Use `retain` (async); avoid `sync_retain` in normal flow (it blocks).
+- Manual ops: `/hindsight-memory-operations` (subcommands: `bootstrap`,
+  `migrate [path]`, `status`, `disable`, `enable`, `forget <query>`).
+- Never touch banks not prefixed with `coding-`.
+- Disable per-repo: `/hindsight-memory-operations disable` or add
+  `enabled: false` to `.bank`.
+- Disable globally: `HINDSIGHT_MEMORY=off` or remove
+  `~/.claude/hindsight-memory.enabled`.
+<!-- hindsight-memory:end -->
+
+<!-- myc:agents-start v=2 -->
 ## Project Management with Mycelium
 
 This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
@@ -12,22 +34,18 @@ myc init
 
 # Create an epic (a large body of work)
 myc epic create --title "Feature X" --description "Build feature X"
-myc epic create --title "Feature X" --notes "Context for agents" --user-info "Extra details"
 
 # Create tasks within an epic
-myc task create --title "Implement Y" --description "Build Y" --epic 1 --priority high --due 2025-12-31
-myc task create --title "Fix Z" --notes "Check the auth module" --user-info "Related to ticket ABC-123"
+myc task create --title "Implement Y" --description "Build the implementation for Y" --epic 1 --priority high --due 2025-12-31
 
 # Task priorities: low, medium, high, critical
 # Task status: open, closed
 
-# List tasks and epics
-myc list                    # Shows epics + tasks (tree view if dependencies exist)
-myc list --epic 1
-myc list --overdue
-myc list --blocked
-myc list --all              # Show all tasks including closed
-myc list --tag "frontend"   # Filter by tag
+# List tasks
+myc task list
+myc task list --epic 1
+myc task list --overdue
+myc task list --blocked
 
 # Manage dependencies (task 1 blocks task 2)
 myc task link blocks --task 1 2
@@ -35,33 +53,6 @@ myc deps show 2
 
 # Close tasks (blocked tasks cannot be closed without --force)
 myc task close 1
-
-# Batch operations (useful for bulk updates)
-myc task batch-op close 1 2 3 [--force]     # Close multiple tasks
-myc task batch-op tag urgent 1 2 3          # Tag multiple tasks
-myc task batch-op move 1 4 5 6              # Move tasks to epic (0 = no epic)
-myc task batch-op delete-orphans [--force]  # Delete tasks without an epic
-
-# Task notes (append-only log entries for progress tracking)
-myc task note 1 "Progress update..."        # Add a note to a task
-myc task notes 1                            # View all notes for a task
-
-# Epic notes (same as task notes, but for epics)
-myc epic note 1 "Sprint planning notes..."  # Add a note to an epic
-myc epic notes 1                            # View all notes for an epic
-
-# Notes, user info, and agent questions (inline fields on tasks/epics)
-myc task update 1 --notes "Implementation tip: use the adapter pattern"
-myc task update 1 --user-info "This is a high-priority item for the Q2 release"
-myc task update 1 --agent-questions "Should we use sync or async here?"
-myc epic update 1 --notes "Overall design notes" --agent-questions "Need clarification on scope"
-
-# Use - to clear a field:
-myc task update 1 --notes -
-myc epic update 1 --agent-questions -
-
-# Task cloning (useful for similar tasks)
-myc task clone 1 [--title "New Title"]      # Clone a task with all metadata
 
 # Assign tasks
 myc assignee create --name "Alice" --github "alice"
@@ -72,61 +63,21 @@ myc task link github-issue --task 1 "owner/repo#123"
 myc task link github-pr --task 1 "owner/repo#456"
 myc task link url --task 1 "https://example.com"
 
-# Tags (comma-separated, stored on tasks)
-myc task create --title "Fix login" --tags "frontend,urgent"
-myc task update 1 --tags "frontend,urgent,auth"  # Replace tags
-myc task update 1 --tags -                        # Remove all tags
-myc task batch-op tag "backend" 1 2 3             # Add tag to multiple tasks
-myc list --tag "frontend"                         # Filter by tag
-
 # Project overview
 myc summary
 
 # Export data
 myc export json
 myc export csv
-
-# Linear integration (bidirectional sync)
-myc linear setup            # Configure API key, team, mappings
-myc linear sync             # Bidirectional sync
-myc linear push             # Push local to Linear
-myc linear pull             # Pull Linear to local
-myc linear status           # Show sync status
-myc linear unlink           # Remove integration
 ```
 
 ### Data Model
 
-- **Epic**: A large body of work with title, description, notes, user info, and agent questions
-- **Task**: A unit of work with title, description, notes, user info, agent questions, tags, priority, due date, and optional epic/assignee links
+- **Epic**: A large body of work with a title and optional description (e.g., a feature or milestone)
+- **Task**: A unit of work with a title and optional description, optionally linked to an epic
 - **Dependency**: Task A blocks Task B (B cannot close until A is closed)
 - **Assignee**: Person assigned to a task (can have GitHub username)
 - **External Ref**: Link to GitHub issues/PRs or URLs
-- **Task Note**: An append-only comment/progress log entry on a task
-- **Epic Note**: An append-only comment/progress log entry on an epic
-
-### Field Guide for Agents
-
-| Field | Where | Purpose |
-|-------|-------|---------|
-| `notes` | Task, Epic | Free-form text for comments, tips, or implementation context. Set via `--notes` on create/update. |
-| `user_info` | Task, Epic | Additional context from the user for agents or collaborators. Set via `--user-info` on create/update. |
-| `agent_questions` | Task, Epic | Questions from the agent that need user clarification. Set via `--agent-questions` on update. |
-| `tags` | Task | Comma-separated labels for categorization and filtering. Set via `--tags` on create/update, or `batch-op tag`. |
-| Task Notes | Task | Append-only log via `myc task note <id> "..."`. View with `myc task notes <id>`. |
-| Epic Notes | Epic | Append-only log via `myc epic note <id> "..."`. View with `myc epic notes <id>`. |
-
-### Tags
-
-Tags are comma-separated strings stored on tasks. They are free-form (no predefined list).
-
-- **Set tags on create**: `myc task create --title "..." --tags "frontend,urgent"`
-- **Replace tags**: `myc task update 1 --tags "new-tag1,new-tag2"`
-- **Remove all tags**: `myc task update 1 --tags -`
-- **Add tag to multiple tasks**: `myc task batch-op tag "my-tag" 1 2 3`
-- **Filter by tag**: `myc list --tag "frontend"` or `myc task list --tag "frontend"`
-
-Tags are matched with substring search (e.g., `--tag "front"` matches `"frontend"`).
 
 ### Git Tracking
 
@@ -137,19 +88,117 @@ git add .mycelium/
 git commit -m "Add mycelium project tracking"
 ```
 
+### Follow-ups (`myc followup`, alias `myc fu`)
+
+Lightweight scratch table for non-blocking "oh-by-the-way" items
+captured mid-work — bugs, questions, ideas, things the user should look
+at later. **Separate from tasks** (no epic/priority/deps/assignee). Most
+follow-ups are resolved by the user, not the agent.
+
+```bash
+myc followup add "body text"                # capture (body required)
+myc followup add "body text" --title "tag"  # optional short title
+myc fu add "short form alias works too"
+
+myc followup list                           # active (open + in_progress)
+myc followup list --all                     # everything
+myc followup list --status done             # specific status
+
+myc followup show <id>                      # full detail
+myc followup next                           # lowest-ID active (agent loop)
+myc followup count                          # JSON: {open, in_progress, done, wontfix}
+
+myc followup start <id>                     # → in_progress
+myc followup done <id> [--reason "..."]     # → done
+myc followup wontfix <id> [--reason "..."]  # → wontfix
+myc followup reopen <id>                    # → open
+
+myc followup edit <id> --body "new body" [--title -|"new title"]
+myc followup append <id> "more context"     # timestamped, preserves existing
+myc followup rm <id> [--force]
+myc followup promote <id> [--epic N] [--priority high]  # convert to task
+```
+
+**Agent rule — end-of-task follow-up check** (MANDATORY)
+
+At the end of every mycelium-tracked unit of work (closing a task,
+finishing a user-requested change that touched myc state), the agent
+MUST:
+
+1. Run `myc followup list --format json` (or `myc followup count
+   --format json`).
+2. If `active > 0`, surface them to the user before wrapping:
+   > "Before we wrap — N open follow-up(s): [titles/bodies]. Want me to
+   > handle any now, or leave for later?"
+3. **Never silently process them.** Always ask.
+
+`myc task close` itself also prints a one-line reminder, but the agent
+should still proactively check.
+
+Use `myc followup add` during work to capture anything you notice but
+shouldn't act on right now.
+
 ### For AI Agents
 
 When working on this project:
 
-1. Check existing tasks: `myc list`
-2. Check blocked tasks: `myc list --blocked`
-3. Read task details and context: `myc task show <id>` (shows notes, user info, agent questions)
-4. Read epic details and context: `myc epic show <id>`
-5. Create tasks for new work: `myc task create --title "..." --description "..." --epic N`
-6. Add progress notes to tasks: `myc task note <id> "Progress update..."`
-7. Add progress notes to epics: `myc epic note <id> "Sprint update..."`
-8. Set agent questions when you need clarification: `myc task update <id> --agent-questions "Should we...?"`
-9. Clone similar tasks: `myc task clone <id> --title "New task"`
-10. Batch close tasks when done: `myc task batch-op close <id> [<id>...]`
-11. Mark tasks complete when done: `myc task close N`
-12. Use `--format json` for machine-readable output: `myc list --format json`
+1. Check existing tasks: `myc task list`
+2. Check blocked tasks: `myc task list --blocked`
+3. Create tasks for new work: `myc task create --title "..." --description "..." --epic N`
+4. Capture incidental observations as follow-ups: `myc followup add "..."`
+5. At end of task: `myc followup list` and surface open ones to the user
+6. Mark tasks complete when done: `myc task close N`
+7. Use `--format json` for machine-readable output: `myc task list --format json`
+
+## Mental Frameworks for Mycelium Usage
+
+### 1. INVEST — Task Quality Gate
+
+Before creating or updating any task, validate it against these criteria.
+A task that fails more than one is not ready to be written.
+
+| Criterion | Rule |
+|---|---|
+| **Independent** | Can be completed without unblocking other tasks first |
+| **Negotiable** | The *what* is fixed; the *how* remains open |
+| **Valuable** | Produces a verifiable, concrete outcome |
+| **Estimable** | If you cannot size it, it is too vague or too large |
+| **Small** | If it spans more than one work cycle, split it |
+| **Testable** | Has an explicit, binary done condition |
+
+> If a task fails **Estimable** or **Testable**, convert it to an Epic and decompose.
+
+---
+
+### 2. DAG — Dependency Graph Thinking
+
+Before scheduling or prioritizing, model the implicit dependency graph.
+
+**Rules:**
+- No task moves to `in_progress` if it has an unresolved upstream blocker
+- Priority is a function of both urgency **and fan-out** (how many tasks does completing this one unlock?)
+- Always work the **critical path** first — not the task that feels most urgent
+
+**Prioritization heuristic:**
+```
+score = urgency + (blocked_tasks_count × 1.5)
+```
+
+When creating a task, explicitly ask: *"What does this block, and what blocks this?"*
+Set dependency links in Mycelium before touching status.
+
+---
+
+### 3. Principle of Minimal Surprise (PMS)
+
+Mycelium's state must remain predictable and auditable at all times.
+
+**Rules:**
+- **Prefer idempotent operations** — update before you create; never duplicate
+- **Check before write** — search for an equivalent item before creating a new one
+- **Always annotate mutations** — every status change, priority shift, or reassignment must carry an explicit `reason` field
+- **No orphan tasks** — every task must be linked to an Epic; every Epic to a strategic goal
+- Deletions are a last resort; prefer `cancelled` status with a reason
+
+> The state of Mycelium after any operation must be explainable to another agent with zero context.
+<!-- myc:agents-end -->

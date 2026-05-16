@@ -120,6 +120,64 @@ pub struct TaskFilters {
     pub search: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Followup {
+    pub id: i64,
+    pub body: String,
+    pub title: Option<String>,
+    pub status: FollowupStatus,
+    pub closure_reason: Option<String>,
+    pub created_at: DateTime<Local>,
+    pub closed_at: Option<DateTime<Local>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewFollowup {
+    pub body: String,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FollowupCounts {
+    pub open: i64,
+    pub in_progress: i64,
+    pub done: i64,
+    pub wontfix: i64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FollowupStatus {
+    Open,
+    InProgress,
+    Done,
+    Wontfix,
+}
+
+impl std::fmt::Display for FollowupStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            FollowupStatus::Open => "open",
+            FollowupStatus::InProgress => "in_progress",
+            FollowupStatus::Done => "done",
+            FollowupStatus::Wontfix => "wontfix",
+        })
+    }
+}
+
+impl std::str::FromStr for FollowupStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "open" => Ok(FollowupStatus::Open),
+            "in_progress" | "in-progress" => Ok(FollowupStatus::InProgress),
+            "done" => Ok(FollowupStatus::Done),
+            "wontfix" | "won't-fix" | "wont-fix" => Ok(FollowupStatus::Wontfix),
+            _ => Err(format!("Invalid followup status: {}", s)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
@@ -194,7 +252,7 @@ impl Task {
         match self.due_date {
             Some(due) => {
                 let today = Local::now().naive_local().date();
-                self.status == Status::Open && due < today
+                (self.status == Status::Open || self.status == Status::InProgress) && due < today
             }
             None => false,
         }
@@ -212,6 +270,7 @@ impl Task {
     pub fn status_icon(&self) -> &'static str {
         match self.status {
             Status::Open => "○",
+            Status::InProgress => "◐",
             Status::Closed => "✓",
         }
     }

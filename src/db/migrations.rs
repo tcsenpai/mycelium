@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use crate::error::Result;
 
-const CURRENT_VERSION: i32 = 5;
+const CURRENT_VERSION: i32 = 6;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     create_migrations_table(conn)?;
@@ -31,6 +31,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if version < 5 {
         migrate_v5(conn)?;
         set_version(conn, 5)?;
+    }
+
+    if version < 6 {
+        migrate_v6(conn)?;
+        set_version(conn, 6)?;
     }
 
     Ok(())
@@ -276,6 +281,30 @@ fn migrate_v5(conn: &Connection) -> Result<()> {
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_epic_notes_epic ON epic_notes(epic_id)",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn migrate_v6(conn: &Connection) -> Result<()> {
+    // Follow-ups: lightweight scratch table for non-blocking
+    // "oh-by-the-way" items captured mid-work. Independent of tasks/epics.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS followups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            body TEXT NOT NULL,
+            title TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            closure_reason TEXT,
+            created_at TEXT NOT NULL,
+            closed_at TEXT
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_followups_status ON followups(status)",
         [],
     )?;
 

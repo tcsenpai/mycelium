@@ -1,0 +1,356 @@
+use colored::Colorize;
+use comfy_table::{ContentArrangement, Table};
+
+use crate::cli::OutputFormat;
+use crate::commands::{ensure_initialized, confirm, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
+use crate::error::{MyceliumError, Result};
+use crate::models::{FollowupStatus, Priority};
+
+pub fn add(body: &str, title: Option<&str>, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let body = body.trim();
+    if body.is_empty() {
+        return Err(MyceliumError::InvalidInput(
+            "Follow-up body cannot be empty".to_string(),
+        ));
+    }
+    let mut db = ensure_initialized()?;
+    let fu = db.create_followup(body, title.map(str::trim).filter(|s| !s.is_empty()))?;
+
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&fu)?);
+        }
+        OutputFormat::Table => {
+            if !quiet {
+                println!(
+                    "{} Added follow-up #{}: {}",
+                    SUCCESS_PREFIX.green(),
+                    fu.id,
+                    fu.display_title()
+                );
+            } else {
+                println!("{}", fu.id);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn list(status: Option<&str>, all: bool, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let db = ensure_initialized()?;
+    let effective = if all { Some("all") } else { status };
+    let items = db.list_followups(effective)?;
+
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&items)?);
+            return Ok(());
+        }
+        OutputFormat::Table => {}
+    }
+
+    if items.is_empty() {
+        if !quiet {
+            println!("{} No follow-ups.", INFO_PREFIX.blue());
+        }
+        return Ok(());
+    }
+
+    let mut table = Table::new();
+    table.set_content_arrangement(ContentArrangement::Dynamic);
+    table.set_header(vec!["ID", "Status", "Title", "Created"]);
+
+    for fu in &items {
+        table.add_row(vec![
+            format!("#{}", fu.id).dimmed().to_string(),
+            format!("{} {}", fu.status.emoji(), fu.status),
+            fu.display_title(),
+            fu.created_at.format("%Y-%m-%d %H:%M").to_string(),
+        ]);
+    }
+
+    if !quiet {
+        println!("{}", table);
+        println!(
+            "{} {} follow-up(s)",
+            INFO_PREFIX.blue(),
+            items.len()
+        );
+    }
+    Ok(())
+}
+
+pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let db = ensure_initialized()?;
+    let fu = db.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+        entity: "followup".to_string(),
+        id: id.to_string(),
+    })?;
+
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&fu)?);
+            return Ok(());
+        }
+        OutputFormat::Table => {}
+    }
+
+    if quiet {
+        println!("{}", fu.body);
+        return Ok(());
+    }
+
+    println!("{} Follow-up #{}", INFO_PREFIX.blue(), fu.id);
+    if let Some(t) = &fu.title {
+        if !t.is_empty() {
+            println!("  Title:   {}", t.bold());
+        }
+    }
+    println!("  Status:  {} {}", fu.status.emoji(), fu.status);
+    println!("  Created: {}", fu.created_at.format("%Y-%m-%d %H:%M"));
+    if let Some(closed) = fu.closed_at {
+        println!("  Closed:  {}", closed.format("%Y-%m-%d %H:%M"));
+    }
+    if let Some(reason) = &fu.closure_reason {
+        println!("  Reason:  {}", reason);
+    }
+    println!("\n{}", fu.body);
+    Ok(())
+}
+
+pub fn next(format: &OutputFormat, quiet: bool) -> Result<()> {
+    let db = ensure_initialized()?;
+    let fu = db.next_followup()?;
+
+    match (format, fu) {
+        (OutputFormat::Json, Some(fu)) => {
+            println!("{}", serde_json::to_string_pretty(&fu)?);
+        }
+        (OutputFormat::Json, None) => {
+            println!("null");
+        }
+        (OutputFormat::Table, Some(fu)) => {
+            if quiet {
+                println!("{}", fu.id);
+            } else {
+                println!(
+                    "{} Next follow-up: #{} — {}",
+                    INFO_PREFIX.blue(),
+                    fu.id,
+                    fu.display_title()
+                );
+                if !fu.body.trim().is_empty() {
+                    println!("\n{}", fu.body);
+                }
+            }
+        }
+        (OutputFormat::Table, None) => {
+            if !quiet {
+                println!("{} No active follow-ups.", INFO_PREFIX.blue());
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn set_status(
+    id: i64,
+    status: FollowupStatus,
+    reason: Option<&str>,
+    quiet: bool,
+) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    let updated = db.update_followup_status(id, status, reason)?;
+
+    if !quiet {
+        println!(
+            "{} Follow-up #{} → {} {}",
+            SUCCESS_PREFIX.green(),
+            updated.id,
+            updated.status.emoji(),
+            updated.status
+        );
+    }
+    Ok(())
+}
+
+pub fn edit(
+    id: i64,
+    body: Option<&str>,
+    title: Option<&str>,
+    clear_title: bool,
+    quiet: bool,
+) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    let updated = db.update_followup_body(id, body, title, clear_title)?;
+
+    if !quiet {
+        println!(
+            "{} Follow-up #{} updated",
+            SUCCESS_PREFIX.green(),
+            updated.id
+        );
+    }
+    Ok(())
+}
+
+/// Append text to the body (preserves existing content, separated by a blank line).
+pub fn append(id: i64, text: &str, quiet: bool) -> Result<()> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(MyceliumError::InvalidInput(
+            "Append text cannot be empty".to_string(),
+        ));
+    }
+    let mut db = ensure_initialized()?;
+    let existing = db.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+        entity: "followup".to_string(),
+        id: id.to_string(),
+    })?;
+
+    let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+    let new_body = if existing.body.trim().is_empty() {
+        format!("[{}] {}", stamp, text)
+    } else {
+        format!("{}\n\n[{}] {}", existing.body.trim_end(), stamp, text)
+    };
+
+    let updated = db.update_followup_body(id, Some(&new_body), None, false)?;
+    if !quiet {
+        println!(
+            "{} Appended to follow-up #{} ({} chars total)",
+            SUCCESS_PREFIX.green(),
+            updated.id,
+            updated.body.len()
+        );
+    }
+    Ok(())
+}
+
+pub fn remove(id: i64, force: bool, quiet: bool) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    let fu = db.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+        entity: "followup".to_string(),
+        id: id.to_string(),
+    })?;
+
+    if !force {
+        let prompt = format!("Delete follow-up #{}: {}?", fu.id, fu.display_title());
+        if !confirm(&prompt) {
+            if !quiet {
+                println!("{} Cancelled", INFO_PREFIX.blue());
+            }
+            return Ok(());
+        }
+    }
+
+    db.delete_followup(id)?;
+    if !quiet {
+        println!("{} Deleted follow-up #{}", SUCCESS_PREFIX.green(), id);
+    }
+    Ok(())
+}
+
+pub fn promote(
+    id: i64,
+    epic: Option<i64>,
+    priority: &str,
+    quiet: bool,
+) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    let fu = db.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
+        entity: "followup".to_string(),
+        id: id.to_string(),
+    })?;
+
+    if matches!(fu.status, FollowupStatus::Done | FollowupStatus::Wontfix) {
+        return Err(MyceliumError::InvalidInput(format!(
+            "Follow-up #{} is already {} — cannot promote",
+            id, fu.status
+        )));
+    }
+
+    let priority_enum: Priority = priority.parse()?;
+
+    let new_title = fu.display_title();
+    let task_body = if fu.title.as_deref().map(|t| !t.is_empty()).unwrap_or(false) {
+        Some(fu.body.as_str())
+    } else {
+        None
+    };
+
+    let task = db.create_task(
+        &new_title,
+        task_body,
+        epic,
+        priority_enum,
+        None,
+        None,
+        None,
+        Some(&format!("Promoted from follow-up #{}", fu.id)),
+        None,
+    )?;
+
+    db.update_followup_status(
+        id,
+        FollowupStatus::Done,
+        Some(&format!("Promoted to task #{}", task.id)),
+    )?;
+
+    if !quiet {
+        println!(
+            "{} Follow-up #{} promoted to task #{}: {}",
+            SUCCESS_PREFIX.green(),
+            id,
+            task.id,
+            task.title
+        );
+    }
+    Ok(())
+}
+
+pub fn count(format: &OutputFormat, quiet: bool) -> Result<()> {
+    let db = ensure_initialized()?;
+    let counts = db.count_followups()?;
+
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&counts)?);
+        }
+        OutputFormat::Table => {
+            if quiet {
+                println!("{}", counts.active());
+            } else {
+                println!(
+                    "{} Follow-ups — open: {}, in_progress: {}, done: {}, wontfix: {}",
+                    INFO_PREFIX.blue(),
+                    counts.open,
+                    counts.in_progress,
+                    counts.done,
+                    counts.wontfix
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Best-effort hint printed at end of task close. Never errors.
+pub fn print_close_hint() {
+    let Ok(db) = ensure_initialized() else { return };
+    let Ok(counts) = db.count_followups() else { return };
+    let active = counts.active();
+    if active == 0 {
+        return;
+    }
+    println!(
+        "{} {} open follow-up(s) — run `myc followup list` to review",
+        WARNING_PREFIX.yellow(),
+        active
+    );
+}
+
+#[allow(dead_code)]
+fn _silence_error_prefix_unused() {
+    let _ = ERROR_PREFIX;
+}

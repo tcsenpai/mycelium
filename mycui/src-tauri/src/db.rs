@@ -1,5 +1,5 @@
 use rusqlite::{Connection, params};
-use chrono::Local;
+use chrono::{DateTime, Local};
 use crate::models::*;
 
 pub struct Database {
@@ -126,6 +126,23 @@ impl Database {
             [],
         )?;
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS followups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                body TEXT NOT NULL,
+                title TEXT,
+                status TEXT NOT NULL DEFAULT 'open',
+                closure_reason TEXT,
+                created_at TEXT NOT NULL,
+                closed_at TEXT
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_followups_status ON followups(status)",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -164,7 +181,7 @@ impl Database {
         let blocked_tasks: i64 = self.conn.query_row(
             "SELECT COUNT(DISTINCT d.task_id) FROM dependencies d 
              JOIN tasks t ON t.id = d.depends_on_task_id 
-             WHERE t.status = 'open'",
+             WHERE t.status IN ('open', 'in_progress')",
             [],
             |row| row.get(0),
         )?;
@@ -428,6 +445,13 @@ impl Database {
         })
     }
 
+    pub fn start_task(&mut self, id: i64) -> Result<Task, rusqlite::Error> {
+        self.update_task(id, TaskUpdate {
+            status: Some(Status::InProgress),
+            ..Default::default()
+        })
+    }
+
     // Epics
     pub fn get_epics(&self) -> Result<Vec<Epic>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
@@ -567,7 +591,7 @@ impl Database {
             "SELECT d.depends_on_task_id
              FROM dependencies d
              JOIN tasks t ON t.id = d.depends_on_task_id
-             WHERE d.task_id = ?1 AND t.status = 'open'"
+             WHERE d.task_id = ?1 AND t.status IN ('open', 'in_progress')"
         )?;
 
         let ids: Result<Vec<i64>, rusqlite::Error> = stmt.query_map([task_id], |row| row.get(0))?.collect();
@@ -651,6 +675,152 @@ impl Database {
             search: Some(query.to_string()),
             ..Default::default()
         })
+    }
+
+    // Follow-ups
+
+    fn map_followup_row(row: &rusqlite::Row) -> Result<Followup, rusqlite::Error> {
+        let status_str: String = row.get(3)?;
+        let status: FollowupStatus = status_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?;
+        let created_at: String = row.get(5)?;
+        let closed_at: Option<String> = row.get(6)?;
+        let parse = |s: &str| -> Result<DateTime<Local>, rusqlite::Error> {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map(|d| d.with_timezone(&Local))
+                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                    0, rusqlite::types::Type::Text, Box::new(e),
+                ))
+        };
+        Ok(Followup {
+            id: row.get(0)?,
+            body: row.get(1)?,
+            title: row.get(2)?,
+            status,
+            closure_reason: row.get(4)?,
+            created_at: parse(&created_at)?,
+            closed_at: closed_at.as_deref().map(parse).transpose()?,
+        })
+    }
+
+    pub fn list_followups(&self, include_closed: bool) -> Result<Vec<Followup>, rusqlite::Error> {
+        let sql = if include_closed {
+            "SELECT id, body, title, status, closure_reason, created_at, closed_at
+             FROM followups ORDER BY id"
+        } else {
+            "SELECT id, body, title, status, closure_reason, created_at, closed_at
+             FROM followups WHERE status IN ('open', 'in_progress') ORDER BY id"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map([], Self::map_followup_row)?;
+        rows.collect()
+    }
+
+    pub fn get_followup(&self, id: i64) -> Result<Option<Followup>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, body, title, status, closure_reason, created_at, closed_at
+             FROM followups WHERE id = ?1"
+        )?;
+        let result = stmt.query_row([id], Self::map_followup_row);
+        match result {
+            Ok(f) => Ok(Some(f)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn create_followup(&mut self, fu: NewFollowup) -> Result<Followup, rusqlite::Error> {
+        let now = Local::now().to_rfc3339();
+        let title = fu.title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        self.conn.execute(
+            "INSERT INTO followups (body, title, status, created_at) VALUES (?1, ?2, 'open', ?3)",
+            params![fu.body, title, now],
+        )?;
+        let id = self.conn.last_insert_rowid();
+        self.get_followup(id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn update_followup_status(
+        &mut self,
+        id: i64,
+        status: FollowupStatus,
+        reason: Option<String>,
+    ) -> Result<Followup, rusqlite::Error> {
+        let now = Local::now().to_rfc3339();
+        let closed_at: Option<String> = match status {
+            FollowupStatus::Open | FollowupStatus::InProgress => None,
+            _ => Some(now),
+        };
+        let reason_str: Option<String> = match status {
+            FollowupStatus::Done | FollowupStatus::Wontfix => reason,
+            _ => None,
+        };
+        self.conn.execute(
+            "UPDATE followups SET status = ?1, closure_reason = ?2, closed_at = ?3 WHERE id = ?4",
+            params![status.to_string(), reason_str, closed_at, id],
+        )?;
+        self.get_followup(id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn update_followup_body(
+        &mut self,
+        id: i64,
+        body: Option<String>,
+        title: Option<Option<String>>,
+    ) -> Result<Followup, rusqlite::Error> {
+        let existing = self.get_followup(id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        let new_body = body.unwrap_or(existing.body);
+        let new_title = match title {
+            Some(t) => t,
+            None => existing.title,
+        };
+        self.conn.execute(
+            "UPDATE followups SET body = ?1, title = ?2 WHERE id = ?3",
+            params![new_body, new_title, id],
+        )?;
+        self.get_followup(id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn append_followup_body(&mut self, id: i64, text: &str) -> Result<Followup, rusqlite::Error> {
+        let existing = self.get_followup(id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        let stamp = Local::now().format("%Y-%m-%d %H:%M");
+        let new_body = if existing.body.trim().is_empty() {
+            format!("[{}] {}", stamp, text)
+        } else {
+            format!("{}\n\n[{}] {}", existing.body.trim_end(), stamp, text)
+        };
+        self.conn.execute(
+            "UPDATE followups SET body = ?1 WHERE id = ?2",
+            params![new_body, id],
+        )?;
+        self.get_followup(id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn delete_followup(&mut self, id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM followups WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn count_followups(&self) -> Result<FollowupCounts, rusqlite::Error> {
+        let mut stmt = self.conn.prepare("SELECT status, COUNT(*) FROM followups GROUP BY status")?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+        let mut counts = FollowupCounts::default();
+        for r in rows {
+            let (s, n) = r?;
+            match s.as_str() {
+                "open" => counts.open = n,
+                "in_progress" => counts.in_progress = n,
+                "done" => counts.done = n,
+                "wontfix" => counts.wontfix = n,
+                _ => {}
+            }
+        }
+        Ok(counts)
     }
 
     // Tags

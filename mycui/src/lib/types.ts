@@ -1,4 +1,4 @@
-export type Status = 'open' | 'closed';
+export type Status = 'open' | 'in_progress' | 'closed';
 
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
 
@@ -76,4 +76,37 @@ export const priorityLabels: Record<Priority, string> = {
   medium: 'Medium',
   high: 'High',
   critical: 'Critical',
+};
+
+export type FollowupStatus = 'open' | 'in_progress' | 'done' | 'wontfix';
+
+export interface Followup {
+  id: number;
+  body: string;
+  title?: string | null;
+  status: FollowupStatus;
+  closure_reason?: string | null;
+  created_at: string;
+  closed_at?: string | null;
+}
+
+export interface FollowupCounts {
+  open: number;
+  in_progress: number;
+  done: number;
+  wontfix: number;
+}
+
+export const followupStatusLabels: Record<FollowupStatus, string> = {
+  open: 'Open',
+  in_progress: 'In Progress',
+  done: 'Done',
+  wontfix: 'Won’t Fix',
+};
+
+export const followupStatusColors: Record<FollowupStatus, string> = {
+  open: 'bg-blue-500',
+  in_progress: 'bg-amber-500',
+  done: 'bg-emerald-500',
+  wontfix: 'bg-zinc-500',
 };

@@ -671,9 +671,10 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
     }
     
     let updated = db.update_task(id, None, None, Some(Status::Closed), None, None, None, None, None, None, None, None)?;
-    
+
     if !quiet {
         println!("{} Closed task #{}: {}", SUCCESS_PREFIX.green(), id, updated.title);
+        crate::commands::followup::print_close_hint();
     }
     Ok(())
 }
@@ -1004,12 +1005,15 @@ pub fn batch_close(task_ids: &[i64], force: bool, quiet: bool) -> Result<()> {
                 println!("  - #{}: {}", task.id, task.title);
             }
             if skipped_count > 0 && !force {
-                println!("\n{} Skipped {} blocked task(s) (use --force to override)", 
+                println!("\n{} Skipped {} blocked task(s) (use --force to override)",
                     INFO_PREFIX.blue(), skipped_count);
+            }
+            if !closed_tasks.is_empty() {
+                crate::commands::followup::print_close_hint();
             }
         }
     }
-    
+
     Ok(())
 }
 

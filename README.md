@@ -19,6 +19,7 @@ A robust, production-grade task/plan manager CLI designed for reliability, agent
 - **📝 Task Notes**: Add comments and notes to tasks
 - **📎 Task Cloning**: Duplicate tasks with all metadata
 - **📦 Batch Operations**: Close, tag, or move multiple tasks at once
+- **📌 Follow-ups**: Lightweight "oh-by-the-way" scratch table for non-blocking items captured mid-work
 
 ## Installation
 
@@ -207,6 +208,40 @@ myc task link github-pr --task <id> "owner/repo#456"
 myc task link url --task <id> "https://..."
 myc task unlink <ref_id>
 ```
+
+### Follow-ups
+
+Lightweight scratch table for non-blocking items captured mid-work
+(bugs you noticed, questions, ideas). Separate from tasks — no
+epic/priority/deps. Body is required, title optional. Statuses:
+`open`, `in_progress`, `done`, `wontfix`.
+
+```bash
+myc followup add "body text" [--title "tag"]    # capture
+myc fu add "short form alias works"
+
+myc followup list                               # active items
+myc followup list --all                         # everything
+myc followup list --status done                 # by status
+myc followup show <id>
+myc followup next                               # lowest-ID active
+
+myc followup start <id>                         # → in_progress
+myc followup done <id> [--reason "..."]
+myc followup wontfix <id> [--reason "..."]
+myc followup reopen <id>
+
+myc followup edit <id> --body "new body" [--title -|"new title"]
+myc followup append <id> "more context"         # timestamped, additive
+myc followup rm <id> [--force]
+myc followup promote <id> [--epic N] [--priority high]   # convert to task
+myc followup count                              # JSON: {open, in_progress, done, wontfix}
+```
+
+After `myc task close`, mycelium prints a one-line reminder if any
+active follow-ups exist. Agents using mycelium MUST run `myc followup
+list` at the end of every work unit and surface open items to the user
+before wrapping (see AGENTS.md).
 
 ### Reporting & Export
 

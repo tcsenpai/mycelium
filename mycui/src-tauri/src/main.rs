@@ -305,6 +305,15 @@ async fn delete_task(
 }
 
 #[tauri::command]
+async fn start_task(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<Task, String> {
+    let mut db = state.db.lock().await;
+    db.start_task(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn close_task(
     state: tauri::State<'_, AppState>,
     id: i64,
@@ -439,6 +448,82 @@ async fn get_all_tags(
     db.get_all_tags().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn list_followups(
+    state: tauri::State<'_, AppState>,
+    include_closed: Option<bool>,
+) -> Result<Vec<Followup>, String> {
+    let db = state.db.lock().await;
+    db.list_followups(include_closed.unwrap_or(false)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_followup(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<Option<Followup>, String> {
+    let db = state.db.lock().await;
+    db.get_followup(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_followup(
+    state: tauri::State<'_, AppState>,
+    followup: NewFollowup,
+) -> Result<Followup, String> {
+    let mut db = state.db.lock().await;
+    db.create_followup(followup).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_followup_status(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    status: FollowupStatus,
+    reason: Option<String>,
+) -> Result<Followup, String> {
+    let mut db = state.db.lock().await;
+    db.update_followup_status(id, status, reason).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn update_followup(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    body: Option<String>,
+    title: Option<Option<String>>,
+) -> Result<Followup, String> {
+    let mut db = state.db.lock().await;
+    db.update_followup_body(id, body, title).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn append_followup(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    text: String,
+) -> Result<Followup, String> {
+    let mut db = state.db.lock().await;
+    db.append_followup_body(id, &text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_followup(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    let mut db = state.db.lock().await;
+    db.delete_followup(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn count_followups(
+    state: tauri::State<'_, AppState>,
+) -> Result<FollowupCounts, String> {
+    let db = state.db.lock().await;
+    db.count_followups().map_err(|e| e.to_string())
+}
+
 fn main() {
     // Find the mycelium database
     let db_path = find_mycelium_db();
@@ -540,6 +625,7 @@ fn main() {
             create_task,
             update_task,
             delete_task,
+            start_task,
             close_task,
             reopen_task,
             get_epics,
@@ -554,6 +640,14 @@ fn main() {
             get_dependencies,
             search_tasks,
             get_all_tags,
+            list_followups,
+            get_followup,
+            create_followup,
+            set_followup_status,
+            update_followup,
+            append_followup,
+            delete_followup,
+            count_followups,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

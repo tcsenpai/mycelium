@@ -19,14 +19,20 @@ import {
   FolderOpen,
   Layers3,
   Loader,
+  Pin,
   Plus,
   Search,
   Sparkles,
+  Trash2,
   X,
 } from 'lucide-react';
 import {
+  appendFollowup,
   closeTask,
+  countFollowups,
+  createFollowup,
   createTask,
+  deleteFollowup,
   getAllTags,
   getAssignees,
   getCurrentDbPath,
@@ -34,13 +40,21 @@ import {
   getEpics,
   getRecentFolders,
   getTasks,
+  listFollowups,
   openFolder,
   openFolderDialog,
   reopenTask,
+  setFollowupStatus,
   updateTask,
 } from './lib/api';
 import type { TaskUpdateInput } from './lib/api';
-import type { Priority, Task } from './lib/types';
+import type {
+  Followup,
+  FollowupStatus,
+  Priority,
+  Task,
+} from './lib/types';
+import { followupStatusColors, followupStatusLabels } from './lib/types';
 
 const QUERY_KEYS = {
   path: ['current-path'],
@@ -50,11 +64,13 @@ const QUERY_KEYS = {
   epics: ['epics'],
   assignees: ['assignees'],
   tags: ['tags'],
+  followups: ['followups'],
+  followupCounts: ['followup-counts'],
 };
 
-type StatusFilter = 'all' | 'open' | 'closed' | 'blocked' | 'overdue';
+type StatusFilter = 'all' | 'open' | 'in_progress' | 'closed' | 'blocked' | 'overdue';
 type PriorityFilter = 'all' | Priority;
-type WorkspaceMode = 'overview' | 'analytics';
+type WorkspaceMode = 'overview' | 'analytics' | 'followups';
 type SmartFilter = 'all' | 'focus' | 'up-next' | 'unassigned' | 'unscheduled' | 'recent';
 type DueFilter = 'all' | 'overdue' | 'today' | 'soon' | 'none';
 type SortMode = 'priority' | 'due' | 'updated' | 'title';
@@ -494,7 +510,10 @@ function App() {
       if (task.status === 'closed') {
         return reopenTask(task.id);
       }
-      return closeTask(task.id);
+      if (task.status === 'in_progress') {
+        return closeTask(task.id);
+      }
+      return updateTask(task.id, { status: 'in_progress' });
     },
     onSuccess: async (task) => {
       startTransition(() => setSelectedTaskId(task.id));
@@ -650,7 +669,7 @@ function App() {
     );
   }
 
-  if (statusFilter === 'open' || statusFilter === 'closed') {
+  if (statusFilter === 'open' || statusFilter === 'in_progress' || statusFilter === 'closed') {
     visibleTasks = visibleTasks.filter((task) => task.status === statusFilter);
   }
 
@@ -713,7 +732,7 @@ function App() {
       switch (smartFilter) {
         case 'focus':
           return (
-            task.status === 'open' &&
+            (task.status === 'open' || task.status === 'in_progress') &&
             (task.priority === 'critical' ||
               task.priority === 'high' ||
               task.blocked_by.length > 0 ||
@@ -721,7 +740,7 @@ function App() {
           );
         case 'up-next':
           return (
-            task.status === 'open' &&
+            (task.status === 'open' || task.status === 'in_progress') &&
             task.blocked_by.length === 0 &&
             ((delta !== null && delta >= 0 && delta <= 7) ||
               task.priority === 'critical' ||
@@ -739,7 +758,8 @@ function App() {
 
   visibleTasks.sort((a, b) => {
     if (a.status !== b.status) {
-      return a.status === 'open' ? -1 : 1;
+      const statusOrder = { blocked: 0, in_progress: 1, open: 2, closed: 3 };
+      return statusOrder[a.status] - statusOrder[b.status];
     }
 
     if (sortMode === 'title') {
@@ -1297,6 +1317,14 @@ function App() {
                 <BarChart3 size={16} />
                 <span>Analytics</span>
               </button>
+              <button
+                className={`view-switch-button ${workspaceMode === 'followups' ? 'is-active' : ''}`}
+                type="button"
+                onClick={() => setWorkspaceMode('followups')}
+              >
+                <Pin size={16} />
+                <span>Follow-ups</span>
+              </button>
             </div>
             <label className="search-field">
               <Search size={16} />
@@ -1429,7 +1457,7 @@ function App() {
 
               <div className="filter-row queue-filter-row">
                 <div className="chip-group">
-                  {(['all', 'open', 'blocked', 'overdue', 'closed'] as StatusFilter[]).map((filter) => (
+                  {(['all', 'open', 'in_progress', 'blocked', 'overdue', 'closed'] as StatusFilter[]).map((filter) => (
                     <button
                       key={filter}
                       className={`filter-chip ${statusFilter === filter ? 'is-active' : ''}`}
@@ -1490,7 +1518,7 @@ function App() {
                               {priorityLabel(task.priority)}
                             </span>
                             <strong>{task.title}</strong>
-                            <span className={`status-pill ${task.status === 'closed' ? 'is-closed' : 'is-open'}`}>
+                            <span className={`status-pill ${task.status === 'closed' ? 'is-closed' : task.status === 'in_progress' ? 'is-in-progress' : 'is-open'}`}>
                               {task.status}
                             </span>
                           </div>
@@ -1546,10 +1574,12 @@ function App() {
                       <Loader size={16} className="spin" />
                     ) : selectedTask.status === 'closed' ? (
                       <ArrowRight size={16} />
-                    ) : (
+                    ) : selectedTask.status === 'in_progress' ? (
                       <CheckCheck size={16} />
+                    ) : (
+                      <CircleDot size={16} />
                     )}
-                    <span>{selectedTask.status === 'closed' ? 'Reopen' : 'Close task'}</span>
+                    <span>{selectedTask.status === 'closed' ? 'Reopen' : selectedTask.status === 'in_progress' ? 'Close' : 'Start'}</span>
                   </button>
                 ) : null}
               </div>
@@ -1734,7 +1764,7 @@ function App() {
             </div>
           </aside>
         </section>
-        ) : (
+        ) : workspaceMode === 'analytics' ? (
         <section className="analytics-grid">
           <div className="panel analytics-panel analytics-panel-wide">
             <div className="panel-head">
@@ -2094,6 +2124,8 @@ function App() {
             ) : null}
           </div>
         </section>
+        ) : (
+        <FollowupsView />
         )}
       </main>
       </div>
@@ -2266,6 +2298,277 @@ function SignalRow({
       </div>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+type FollowupComposerState = {
+  body: string;
+  title: string;
+};
+
+const initialFollowupComposer: FollowupComposerState = { body: '', title: '' };
+
+function FollowupsView() {
+  const queryClient = useQueryClient();
+  const [filter, setFilter] = useState<'active' | 'all'>('active');
+  const [composer, setComposer] = useState<FollowupComposerState>(initialFollowupComposer);
+  const [appendingId, setAppendingId] = useState<number | null>(null);
+  const [appendText, setAppendText] = useState('');
+
+  const followupsQuery = useQuery({
+    queryKey: [...QUERY_KEYS.followups, filter],
+    queryFn: () => listFollowups(filter === 'all'),
+    placeholderData: (prev) => prev,
+  });
+
+  const countsQuery = useQuery({
+    queryKey: QUERY_KEYS.followupCounts,
+    queryFn: countFollowups,
+    placeholderData: (prev) => prev,
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.followups });
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.followupCounts });
+  };
+
+  const createMutation = useMutation({
+    mutationFn: (input: { body: string; title?: string }) => createFollowup(input),
+    onSuccess: () => {
+      setComposer(initialFollowupComposer);
+      invalidate();
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status, reason }: { id: number; status: FollowupStatus; reason?: string }) =>
+      setFollowupStatus(id, status, reason),
+    onSuccess: invalidate,
+  });
+
+  const appendMutation = useMutation({
+    mutationFn: ({ id, text }: { id: number; text: string }) => appendFollowup(id, text),
+    onSuccess: () => {
+      setAppendingId(null);
+      setAppendText('');
+      invalidate();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteFollowup(id),
+    onSuccess: invalidate,
+  });
+
+  const followups = followupsQuery.data ?? [];
+  const counts = countsQuery.data;
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body = composer.body.trim();
+    if (!body) return;
+    createMutation.mutate({
+      body,
+      title: composer.title.trim() || undefined,
+    });
+  };
+
+  const handleAppend = (id: number) => {
+    const text = appendText.trim();
+    if (!text) return;
+    appendMutation.mutate({ id, text });
+  };
+
+  const handleDelete = (id: number) => {
+    if (!confirm(`Delete follow-up #${id}? This cannot be undone.`)) return;
+    deleteMutation.mutate(id);
+  };
+
+  return (
+    <section className="followups-grid">
+      <div className="panel panel-list">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Capture</p>
+            <h3>New follow-up</h3>
+          </div>
+        </div>
+        <form className="followup-composer" onSubmit={handleSubmit}>
+          <textarea
+            value={composer.body}
+            onChange={(event) => setComposer((c) => ({ ...c, body: event.target.value }))}
+            placeholder="What did you notice? Paste the bug, question, or 'oh-by-the-way'."
+            rows={3}
+            required
+          />
+          <div className="followup-composer-row">
+            <input
+              type="text"
+              value={composer.title}
+              onChange={(event) => setComposer((c) => ({ ...c, title: event.target.value }))}
+              placeholder="Optional title (auto-derived from body if empty)"
+            />
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={createMutation.isPending || !composer.body.trim()}
+            >
+              <Plus size={16} />
+              <span>Add</span>
+            </button>
+          </div>
+        </form>
+
+        {counts ? (
+          <div className="followup-counters">
+            <span>Open: <strong>{counts.open}</strong></span>
+            <span>In progress: <strong>{counts.in_progress}</strong></span>
+            <span>Done: <strong>{counts.done}</strong></span>
+            <span>Won't fix: <strong>{counts.wontfix}</strong></span>
+          </div>
+        ) : null}
+
+        <div className="panel-head" style={{ marginTop: 12 }}>
+          <div>
+            <p className="eyebrow">List</p>
+            <h3>{filter === 'all' ? 'All follow-ups' : 'Active follow-ups'}</h3>
+          </div>
+          <div className="chip-group">
+            <button
+              type="button"
+              className={`filter-chip ${filter === 'active' ? 'is-active' : ''}`}
+              onClick={() => setFilter('active')}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              className={`filter-chip ${filter === 'all' ? 'is-active' : ''}`}
+              onClick={() => setFilter('all')}
+            >
+              All
+            </button>
+          </div>
+        </div>
+
+        {followupsQuery.isLoading ? (
+          <div className="empty-state"><Loader size={16} /> Loading…</div>
+        ) : followups.length === 0 ? (
+          <div className="empty-state">
+            {filter === 'active' ? 'No active follow-ups. Capture one above.' : 'No follow-ups yet.'}
+          </div>
+        ) : (
+          <ul className="followup-list">
+            {followups.map((fu) => (
+              <FollowupCard
+                key={fu.id}
+                followup={fu}
+                onStatus={(status, reason) => statusMutation.mutate({ id: fu.id, status, reason })}
+                onDelete={() => handleDelete(fu.id)}
+                onStartAppend={() => {
+                  setAppendingId(fu.id);
+                  setAppendText('');
+                }}
+                appending={appendingId === fu.id}
+                appendText={appendText}
+                setAppendText={setAppendText}
+                onSubmitAppend={() => handleAppend(fu.id)}
+                onCancelAppend={() => setAppendingId(null)}
+                busy={statusMutation.isPending || appendMutation.isPending || deleteMutation.isPending}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FollowupCard({
+  followup,
+  onStatus,
+  onDelete,
+  onStartAppend,
+  appending,
+  appendText,
+  setAppendText,
+  onSubmitAppend,
+  onCancelAppend,
+  busy,
+}: {
+  followup: Followup;
+  onStatus: (status: FollowupStatus, reason?: string) => void;
+  onDelete: () => void;
+  onStartAppend: () => void;
+  appending: boolean;
+  appendText: string;
+  setAppendText: (t: string) => void;
+  onSubmitAppend: () => void;
+  onCancelAppend: () => void;
+  busy: boolean;
+}) {
+  const display = followup.title?.trim() || followup.body.slice(0, 60);
+  return (
+    <li className="followup-card">
+      <div className="followup-header">
+        <span className={`status-pill ${followupStatusColors[followup.status]}`}>
+          {followupStatusLabels[followup.status]}
+        </span>
+        <span className="followup-id">#{followup.id}</span>
+        <strong className="followup-title">{display}</strong>
+      </div>
+      <pre className="followup-body">{followup.body}</pre>
+      {followup.closure_reason ? (
+        <div className="followup-meta">Reason: {followup.closure_reason}</div>
+      ) : null}
+      {appending ? (
+        <div className="followup-append">
+          <textarea
+            value={appendText}
+            onChange={(event) => setAppendText(event.target.value)}
+            placeholder="Add more context (timestamped, preserves existing body)…"
+            rows={2}
+            autoFocus
+          />
+          <div className="followup-actions">
+            <button className="primary-button" type="button" onClick={onSubmitAppend} disabled={busy || !appendText.trim()}>
+              Append
+            </button>
+            <button className="ghost-button" type="button" onClick={onCancelAppend} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="followup-actions">
+          {followup.status === 'open' ? (
+            <button className="ghost-button" type="button" onClick={() => onStatus('in_progress')} disabled={busy}>
+              Start
+            </button>
+          ) : null}
+          {(followup.status === 'open' || followup.status === 'in_progress') ? (
+            <>
+              <button className="ghost-button" type="button" onClick={() => onStatus('done')} disabled={busy}>
+                <CheckCheck size={14} /> Done
+              </button>
+              <button className="ghost-button" type="button" onClick={() => onStatus('wontfix')} disabled={busy}>
+                Won't fix
+              </button>
+            </>
+          ) : (
+            <button className="ghost-button" type="button" onClick={() => onStatus('open')} disabled={busy}>
+              Reopen
+            </button>
+          )}
+          <button className="ghost-button" type="button" onClick={onStartAppend} disabled={busy}>
+            <Plus size={14} /> Append
+          </button>
+          <button className="ghost-button danger" type="button" onClick={onDelete} disabled={busy}>
+            <Trash2 size={14} />
+          </button>
+        </div>
+      )}
+    </li>
   );
 }
 
