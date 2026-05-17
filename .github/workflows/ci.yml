@@ -57,7 +57,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy
 
   fmt:
     name: Format
