@@ -2,7 +2,7 @@ use colored::Colorize;
 use comfy_table::{ContentArrangement, Table};
 
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, confirm, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
+use crate::commands::{confirm, ensure_initialized, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
 use crate::error::{MyceliumError, Result};
 use crate::models::{FollowupStatus, Priority};
 
@@ -94,21 +94,19 @@ pub fn list(
 
     if !quiet {
         println!("{}", table);
-        println!(
-            "{} {} follow-up(s)",
-            INFO_PREFIX.blue(),
-            items.len()
-        );
+        println!("{} {} follow-up(s)", INFO_PREFIX.blue(), items.len());
     }
     Ok(())
 }
 
 pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
     let db = ensure_initialized()?;
-    let fu = db.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-        entity: "followup".to_string(),
-        id: id.to_string(),
-    })?;
+    let fu = db
+        .get_followup(id)?
+        .ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })?;
 
     match format {
         OutputFormat::Json => {
@@ -226,10 +224,12 @@ pub fn append(id: i64, text: &str, quiet: bool) -> Result<()> {
         ));
     }
     let mut db = ensure_initialized()?;
-    let existing = db.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-        entity: "followup".to_string(),
-        id: id.to_string(),
-    })?;
+    let existing = db
+        .get_followup(id)?
+        .ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })?;
 
     // Include TZ offset so timestamps stay unambiguous across machines.
     let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M %z");
@@ -253,10 +253,12 @@ pub fn append(id: i64, text: &str, quiet: bool) -> Result<()> {
 
 pub fn remove(id: i64, force: bool, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
-    let fu = db.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-        entity: "followup".to_string(),
-        id: id.to_string(),
-    })?;
+    let fu = db
+        .get_followup(id)?
+        .ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })?;
 
     if !force {
         let prompt = format!("Delete follow-up #{}: {}?", fu.id, fu.display_title());
@@ -275,17 +277,14 @@ pub fn remove(id: i64, force: bool, quiet: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn promote(
-    id: i64,
-    epic: Option<i64>,
-    priority: &str,
-    quiet: bool,
-) -> Result<()> {
+pub fn promote(id: i64, epic: Option<i64>, priority: &str, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
-    let fu = db.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-        entity: "followup".to_string(),
-        id: id.to_string(),
-    })?;
+    let fu = db
+        .get_followup(id)?
+        .ok_or_else(|| MyceliumError::NotFound {
+            entity: "followup".to_string(),
+            id: id.to_string(),
+        })?;
 
     if matches!(fu.status, FollowupStatus::Done | FollowupStatus::Wontfix) {
         return Err(MyceliumError::InvalidInput(format!(
@@ -359,7 +358,9 @@ pub fn count(format: &OutputFormat, quiet: bool) -> Result<()> {
 /// Best-effort hint printed at end of task close. Never errors.
 pub fn print_close_hint() {
     let Ok(db) = ensure_initialized() else { return };
-    let Ok(counts) = db.count_followups() else { return };
+    let Ok(counts) = db.count_followups() else {
+        return;
+    };
     let active = counts.active();
     if active == 0 {
         return;
@@ -370,4 +371,3 @@ pub fn print_close_hint() {
         active
     );
 }
-

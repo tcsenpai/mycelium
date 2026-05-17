@@ -1,7 +1,9 @@
-use colored::Colorize;
-use crate::commands::{ensure_initialized, SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX, WARNING_PREFIX};
+use crate::commands::{
+    ensure_initialized, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX,
+};
 use crate::db::Database;
 use crate::error::Result;
+use colored::Colorize;
 use std::fs;
 
 pub struct CheckResult {
@@ -76,7 +78,11 @@ pub fn execute(fix: bool, quiet: bool) -> Result<()> {
     // Try to fix issues if requested
     if fix && fixable_count > 0 {
         if !quiet {
-            println!("{} Attempting to fix {} issue(s)...", INFO_PREFIX.blue(), fixable_count);
+            println!(
+                "{} Attempting to fix {} issue(s)...",
+                INFO_PREFIX.blue(),
+                fixable_count
+            );
             println!();
         }
 
@@ -114,13 +120,23 @@ pub fn execute(fix: bool, quiet: bool) -> Result<()> {
     }
 
     // Summary
-    let ok_count = results.iter().filter(|r| matches!(r.status, CheckStatus::Ok)).count();
-    let warning_count = results.iter().filter(|r| matches!(r.status, CheckStatus::Warning)).count();
-    let error_count = results.iter().filter(|r| matches!(r.status, CheckStatus::Error)).count();
+    let ok_count = results
+        .iter()
+        .filter(|r| matches!(r.status, CheckStatus::Ok))
+        .count();
+    let warning_count = results
+        .iter()
+        .filter(|r| matches!(r.status, CheckStatus::Warning))
+        .count();
+    let error_count = results
+        .iter()
+        .filter(|r| matches!(r.status, CheckStatus::Error))
+        .count();
 
     if !quiet {
         println!();
-        println!("Summary: {} OK, {} warnings, {} errors", 
+        println!(
+            "Summary: {} OK, {} warnings, {} errors",
             ok_count.to_string().green(),
             warning_count.to_string().yellow(),
             error_count.to_string().red()
@@ -128,8 +144,11 @@ pub fn execute(fix: bool, quiet: bool) -> Result<()> {
 
         if fixable_count > 0 && !fix {
             println!();
-            println!("{} {} issue(s) can be fixed automatically. Run with --fix to apply.", 
-                INFO_PREFIX.blue(), fixable_count);
+            println!(
+                "{} {} issue(s) can be fixed automatically. Run with --fix to apply.",
+                INFO_PREFIX.blue(),
+                fixable_count
+            );
         }
 
         if fix && fixed_count > 0 {
@@ -155,8 +174,9 @@ fn display_results(results: &[CheckResult]) {
         };
 
         let fix_indicator = if result.fixable { " [fixable]" } else { "" };
-        
-        println!("{} {}: {}{}", 
+
+        println!(
+            "{} {}: {}{}",
             icon.color(color),
             result.name.bold(),
             result.message,
@@ -174,11 +194,14 @@ fn check_project_initialized() -> Result<CheckResult> {
         return Ok(CheckResult::error(
             "Project initialized",
             "No .mycelium/ directory found. Run 'myc init' first.",
-            false
+            false,
         ));
     }
 
-    Ok(CheckResult::ok("Project initialized", ".mycelium/ directory exists"))
+    Ok(CheckResult::ok(
+        "Project initialized",
+        ".mycelium/ directory exists",
+    ))
 }
 
 fn check_database_accessible() -> Result<CheckResult> {
@@ -191,7 +214,7 @@ fn check_database_accessible() -> Result<CheckResult> {
         return Ok(CheckResult::error(
             "Database accessible",
             "Database file not found",
-            true
+            true,
         ));
     }
 
@@ -200,7 +223,7 @@ fn check_database_accessible() -> Result<CheckResult> {
         Err(e) => Ok(CheckResult::error(
             "Database accessible",
             format!("Cannot open database: {}", e),
-            false
+            false,
         )),
     }
 }
@@ -212,53 +235,70 @@ fn check_database_integrity() -> Result<CheckResult> {
         .join("mycelium.db");
 
     if !db_path.exists() {
-        return Ok(CheckResult::warning("Database integrity", "Database doesn't exist, skipping check"));
+        return Ok(CheckResult::warning(
+            "Database integrity",
+            "Database doesn't exist, skipping check",
+        ));
     }
 
     match Database::open(&db_path) {
         Ok(db) => {
             // Try to query each table to verify integrity
             let conn = db.get_conn();
-            
-            let tables = ["epics", "tasks", "assignees", "dependencies", "external_refs"];
+
+            let tables = [
+                "epics",
+                "tasks",
+                "assignees",
+                "dependencies",
+                "external_refs",
+            ];
             for table in &tables {
                 // Check if table exists by querying sqlite_master
-                let exists: bool = conn.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)",
-                    [table],
-                    |row| row.get(0),
-                ).unwrap_or(false);
-                
+                let exists: bool = conn
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)",
+                        [table],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(false);
+
                 if !exists {
                     return Ok(CheckResult::error(
                         "Database integrity",
                         format!("Table '{}' does not exist", table),
-                        false
+                        false,
                     ));
                 }
-                
+
                 // Try to get column info to verify structure
                 let result: std::result::Result<String, rusqlite::Error> = conn.query_row(
-                    &format!("SELECT sql FROM sqlite_master WHERE type='table' AND name='{}'", table),
+                    &format!(
+                        "SELECT sql FROM sqlite_master WHERE type='table' AND name='{}'",
+                        table
+                    ),
                     [],
                     |row| row.get(0),
                 );
-                
+
                 if let Err(e) = result {
                     return Ok(CheckResult::error(
                         "Database integrity",
                         format!("Table '{}' structure check failed: {}", table, e),
-                        false
+                        false,
                     ));
                 }
             }
-            
-            Ok(CheckResult::ok("Database integrity", "All tables accessible"))
+
+            Ok(CheckResult::ok(
+                "Database integrity",
+                "All tables accessible",
+            ))
         }
         Err(e) => Ok(CheckResult::error(
             "Database integrity",
             format!("Cannot verify: {}", e),
-            false
+            false,
         )),
     }
 }
@@ -270,21 +310,26 @@ fn check_orphaned_tasks() -> Result<CheckResult> {
         .join("mycelium.db");
 
     if !db_path.exists() {
-        return Ok(CheckResult::warning("Orphaned tasks", "Database doesn't exist, skipping check"));
+        return Ok(CheckResult::warning(
+            "Orphaned tasks",
+            "Database doesn't exist, skipping check",
+        ));
     }
 
     match Database::open(&db_path) {
         Ok(db) => {
             let conn = db.get_conn();
-            
+
             // Check for tasks with non-existent epic_id
-            let orphaned: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks t 
+            let orphaned: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM tasks t 
                  LEFT JOIN epics e ON t.epic_id = e.id 
                  WHERE t.epic_id IS NOT NULL AND e.id IS NULL",
-                [],
-                |row| row.get(0),
-            ).unwrap_or(0);
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
 
             if orphaned > 0 {
                 Ok(CheckResult::warning(
@@ -306,28 +351,37 @@ fn check_circular_dependencies() -> Result<CheckResult> {
         .join("mycelium.db");
 
     if !db_path.exists() {
-        return Ok(CheckResult::warning("Circular dependencies", "Database doesn't exist, skipping check"));
+        return Ok(CheckResult::warning(
+            "Circular dependencies",
+            "Database doesn't exist, skipping check",
+        ));
     }
 
     match Database::open(&db_path) {
         Ok(db) => {
             let tasks = db.list_tasks(None, None, None, None, false, false, None)?;
-            
+
             for task in &tasks {
                 if let Ok(chain) = db.get_all_dependencies(task.id) {
                     if chain.all_dependencies.contains(&task.id) {
                         return Ok(CheckResult::error(
                             "Circular dependencies",
                             format!("Task #{} has circular dependency", task.id),
-                            true
+                            true,
                         ));
                     }
                 }
             }
-            
-            Ok(CheckResult::ok("Circular dependencies", "No circular dependencies found"))
+
+            Ok(CheckResult::ok(
+                "Circular dependencies",
+                "No circular dependencies found",
+            ))
         }
-        Err(_) => Ok(CheckResult::warning("Circular dependencies", "Cannot check")),
+        Err(_) => Ok(CheckResult::warning(
+            "Circular dependencies",
+            "Cannot check",
+        )),
     }
 }
 
@@ -341,7 +395,7 @@ fn check_gitignore() -> Result<CheckResult> {
         return Ok(CheckResult::error(
             "Gitignore",
             ".mycelium/.gitignore not found",
-            true
+            true,
         ));
     }
 
@@ -353,11 +407,15 @@ fn check_gitignore() -> Result<CheckResult> {
                 Ok(CheckResult::error(
                     "Gitignore",
                     ".gitignore missing WAL file entries",
-                    true
+                    true,
                 ))
             }
         }
-        Err(_) => Ok(CheckResult::error("Gitignore", "Cannot read .gitignore", false)),
+        Err(_) => Ok(CheckResult::error(
+            "Gitignore",
+            "Cannot read .gitignore",
+            false,
+        )),
     }
 }
 
@@ -372,7 +430,7 @@ fn check_wal_files() -> Result<CheckResult> {
     if wal_exists || shm_exists {
         Ok(CheckResult::warning(
             "WAL files",
-            "WAL files present (normal during operation, can be checkpointed)"
+            "WAL files present (normal during operation, can be checkpointed)",
         ))
     } else {
         Ok(CheckResult::ok("WAL files", "No WAL files (clean)"))
@@ -386,27 +444,33 @@ fn check_schema_version() -> Result<CheckResult> {
         .join("mycelium.db");
 
     if !db_path.exists() {
-        return Ok(CheckResult::warning("Schema version", "Database doesn't exist"));
+        return Ok(CheckResult::warning(
+            "Schema version",
+            "Database doesn't exist",
+        ));
     }
 
     match Database::open(&db_path) {
         Ok(db) => {
             let conn = db.get_conn();
-            
+
             // Check if we can query the tags column (schema v2)
             match conn.execute("SELECT tags FROM tasks LIMIT 1", []) {
-                Ok(_) => Ok(CheckResult::ok("Schema version", "Database schema is up to date (v2)")),
+                Ok(_) => Ok(CheckResult::ok(
+                    "Schema version",
+                    "Database schema is up to date (v2)",
+                )),
                 Err(_) => Ok(CheckResult::error(
                     "Schema version",
                     "Database schema is outdated. Missing 'tags' column.",
-                    true
+                    true,
                 )),
             }
         }
         Err(e) => Ok(CheckResult::error(
             "Schema version",
             format!("Cannot check: {}", e),
-            false
+            false,
         )),
     }
 }
@@ -461,10 +525,10 @@ fn fix_schema() -> Result<bool> {
     }
 
     let mut db = Database::open(&db_path)?;
-    
+
     // Re-run migrations
     db.migrate()?;
-    
+
     Ok(true)
 }
 

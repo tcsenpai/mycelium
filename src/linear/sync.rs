@@ -48,7 +48,10 @@ fn resolve_filter_label_ids(
 ) -> Result<Vec<String>> {
     let mut ids = Vec::new();
     for name in filter_labels {
-        if let Some(label) = existing_labels.iter().find(|l| l.name.eq_ignore_ascii_case(name)) {
+        if let Some(label) = existing_labels
+            .iter()
+            .find(|l| l.name.eq_ignore_ascii_case(name))
+        {
             ids.push(label.id.clone());
         } else {
             // Create the label if it doesn't exist
@@ -70,7 +73,8 @@ pub fn push(
     let states = client.fetch_workflow_states(&config.team_id)?;
     let members = client.fetch_team_members(&config.team_id)?;
     let existing_labels = client.fetch_labels(&config.team_id)?;
-    let filter_label_ids = resolve_filter_label_ids(client, config, &filter_labels, &existing_labels)?;
+    let filter_label_ids =
+        resolve_filter_label_ids(client, config, &filter_labels, &existing_labels)?;
 
     let tasks = db.list_all_tasks()?;
 
@@ -86,10 +90,13 @@ pub fn push(
             Some(entry) => {
                 let current_hash = mapping::hash_task(task);
                 if current_hash != entry.last_local_hash {
-                    let state_id = mapping::status_to_linear_state_id(&task.status, &states, config)?;
+                    let state_id =
+                        mapping::status_to_linear_state_id(&task.status, &states, config)?;
                     let priority = mapping::priority_to_linear(&task.priority, config);
-                    let assignee_linear_id = resolve_assignee(db, task.assignee_id, config, &members)?;
-                    let mut label_ids = get_label_ids_for_task(db, task, client, config, &existing_labels)?;
+                    let assignee_linear_id =
+                        resolve_assignee(db, task.assignee_id, config, &members)?;
+                    let mut label_ids =
+                        get_label_ids_for_task(db, task, client, config, &existing_labels)?;
                     // Ensure filter labels are always present
                     for fid in &filter_label_ids {
                         if !label_ids.contains(fid) {
@@ -105,18 +112,29 @@ pub fn push(
                         Some(&state_id),
                         assignee_linear_id.as_deref(),
                         task.due_date.map(|d| d.to_string()).as_deref(),
-                        if label_ids.is_empty() { None } else { Some(&label_ids) },
+                        if label_ids.is_empty() {
+                            None
+                        } else {
+                            Some(&label_ids)
+                        },
                     ) {
                         Ok(issue) => {
                             let remote_hash = mapping::hash_issue(&issue);
                             db.update_linear_sync(task.id, &current_hash, &remote_hash)?;
                             stats.pushed_updated += 1;
                             if !quiet {
-                                println!("  {} Updated {} -> {}", "->".blue(), task.title, issue.identifier);
+                                println!(
+                                    "  {} Updated {} -> {}",
+                                    "->".blue(),
+                                    task.title,
+                                    issue.identifier
+                                );
                             }
                         }
                         Err(e) => {
-                            stats.errors.push(format!("Failed to update task {}: {}", task.id, e));
+                            stats
+                                .errors
+                                .push(format!("Failed to update task {}: {}", task.id, e));
                         }
                     }
                 }
@@ -125,7 +143,8 @@ pub fn push(
                 let state_id = mapping::status_to_linear_state_id(&task.status, &states, config)?;
                 let priority = mapping::priority_to_linear(&task.priority, config);
                 let assignee_linear_id = resolve_assignee(db, task.assignee_id, config, &members)?;
-                let mut label_ids = get_label_ids_for_task(db, task, client, config, &existing_labels)?;
+                let mut label_ids =
+                    get_label_ids_for_task(db, task, client, config, &existing_labels)?;
                 // Ensure filter labels are always present on new issues
                 for fid in &filter_label_ids {
                     if !label_ids.contains(fid) {
@@ -146,14 +165,28 @@ pub fn push(
                     Ok(issue) => {
                         let local_hash = mapping::hash_task(task);
                         let remote_hash = mapping::hash_issue(&issue);
-                        db.create_linear_sync(task.id, &issue.id, Some(&issue.identifier), &local_hash, &remote_hash)?;
+                        db.create_linear_sync(
+                            task.id,
+                            &issue.id,
+                            Some(&issue.identifier),
+                            &local_hash,
+                            &remote_hash,
+                        )?;
                         stats.pushed_new += 1;
                         if !quiet {
-                            println!("  {} Created {} -> {}", "++".green(), task.title, issue.identifier);
+                            println!(
+                                "  {} Created {} -> {}",
+                                "++".green(),
+                                task.title,
+                                issue.identifier
+                            );
                         }
                     }
                     Err(e) => {
-                        stats.errors.push(format!("Failed to create issue for task {}: {}", task.id, e));
+                        stats.errors.push(format!(
+                            "Failed to create issue for task {}: {}",
+                            task.id, e
+                        ));
                     }
                 }
             }
@@ -176,7 +209,10 @@ pub fn pull(
         if filter_labels.is_empty() {
             println!("  Fetching active issues from Linear...");
         } else {
-            println!("  Fetching active issues with labels {:?}...", filter_labels);
+            println!(
+                "  Fetching active issues with labels {:?}...",
+                filter_labels
+            );
         }
     }
     let issues = client.fetch_all_issues_filtered(&config.team_id, &filter_labels, true)?;
@@ -218,13 +254,17 @@ pub fn sync(
     let states = client.fetch_workflow_states(&config.team_id)?;
     let members = client.fetch_team_members(&config.team_id)?;
     let existing_labels = client.fetch_labels(&config.team_id)?;
-    let filter_label_ids = resolve_filter_label_ids(client, config, &filter_labels, &existing_labels)?;
+    let filter_label_ids =
+        resolve_filter_label_ids(client, config, &filter_labels, &existing_labels)?;
 
     if !quiet {
         if filter_labels.is_empty() {
             println!("  Fetching active issues from Linear...");
         } else {
-            println!("  Fetching active issues with labels {:?}...", filter_labels);
+            println!(
+                "  Fetching active issues with labels {:?}...",
+                filter_labels
+            );
         }
     }
     let issues = client.fetch_all_issues_filtered(&config.team_id, &filter_labels, true)?;
@@ -265,7 +305,10 @@ pub fn sync(
                             };
                             println!(
                                 "  {} Conflict on {} ({}) -- {}",
-                                "!!".yellow(), issue.identifier, task.title, winner
+                                "!!".yellow(),
+                                issue.identifier,
+                                task.title,
+                                winner
                             );
                         }
                     } else if remote_changed {
@@ -296,10 +339,13 @@ pub fn sync(
             Some(entry) => {
                 let local_hash = mapping::hash_task(task);
                 if local_hash != entry.last_local_hash {
-                    let state_id = mapping::status_to_linear_state_id(&task.status, &states, config)?;
+                    let state_id =
+                        mapping::status_to_linear_state_id(&task.status, &states, config)?;
                     let priority = mapping::priority_to_linear(&task.priority, config);
-                    let assignee_linear_id = resolve_assignee(db, task.assignee_id, config, &members)?;
-                    let mut label_ids = get_label_ids_for_task(db, task, client, config, &existing_labels)?;
+                    let assignee_linear_id =
+                        resolve_assignee(db, task.assignee_id, config, &members)?;
+                    let mut label_ids =
+                        get_label_ids_for_task(db, task, client, config, &existing_labels)?;
                     for fid in &filter_label_ids {
                         if !label_ids.contains(fid) {
                             label_ids.push(fid.clone());
@@ -314,17 +360,28 @@ pub fn sync(
                         Some(&state_id),
                         assignee_linear_id.as_deref(),
                         task.due_date.map(|d| d.to_string()).as_deref(),
-                        if label_ids.is_empty() { None } else { Some(&label_ids) },
+                        if label_ids.is_empty() {
+                            None
+                        } else {
+                            Some(&label_ids)
+                        },
                     ) {
                         Ok(issue) => {
                             let remote_hash = mapping::hash_issue(&issue);
                             db.update_linear_sync(task.id, &local_hash, &remote_hash)?;
                             stats.pushed_updated += 1;
                             if !quiet {
-                                println!("  {} Updated {} -> {}", "->".blue(), task.title, issue.identifier);
+                                println!(
+                                    "  {} Updated {} -> {}",
+                                    "->".blue(),
+                                    task.title,
+                                    issue.identifier
+                                );
                             }
                         }
-                        Err(e) => stats.errors.push(format!("Failed to update {}: {}", task.id, e)),
+                        Err(e) => stats
+                            .errors
+                            .push(format!("Failed to update {}: {}", task.id, e)),
                     }
                 }
             }
@@ -332,7 +389,8 @@ pub fn sync(
                 let state_id = mapping::status_to_linear_state_id(&task.status, &states, config)?;
                 let priority = mapping::priority_to_linear(&task.priority, config);
                 let assignee_linear_id = resolve_assignee(db, task.assignee_id, config, &members)?;
-                let mut label_ids = get_label_ids_for_task(db, task, client, config, &existing_labels)?;
+                let mut label_ids =
+                    get_label_ids_for_task(db, task, client, config, &existing_labels)?;
                 for fid in &filter_label_ids {
                     if !label_ids.contains(fid) {
                         label_ids.push(fid.clone());
@@ -352,13 +410,27 @@ pub fn sync(
                     Ok(issue) => {
                         let local_hash = mapping::hash_task(task);
                         let remote_hash = mapping::hash_issue(&issue);
-                        db.create_linear_sync(task.id, &issue.id, Some(&issue.identifier), &local_hash, &remote_hash)?;
+                        db.create_linear_sync(
+                            task.id,
+                            &issue.id,
+                            Some(&issue.identifier),
+                            &local_hash,
+                            &remote_hash,
+                        )?;
                         stats.pushed_new += 1;
                         if !quiet {
-                            println!("  {} Created {} -> {}", "++".green(), task.title, issue.identifier);
+                            println!(
+                                "  {} Created {} -> {}",
+                                "++".green(),
+                                task.title,
+                                issue.identifier
+                            );
                         }
                     }
-                    Err(e) => stats.errors.push(format!("Failed to create issue for task {}: {}", task.id, e)),
+                    Err(e) => stats.errors.push(format!(
+                        "Failed to create issue for task {}: {}",
+                        task.id, e
+                    )),
                 }
             }
         }
@@ -379,7 +451,9 @@ fn apply_remote_to_local(
     let status = mapping::status_from_linear(&issue.state);
     let priority = mapping::priority_from_linear(issue.priority);
     let tags = labels_to_tags(&issue.labels.nodes);
-    let due_date = issue.due_date.as_deref()
+    let due_date = issue
+        .due_date
+        .as_deref()
         .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
 
     db.update_task(
@@ -398,7 +472,9 @@ fn apply_remote_to_local(
     )?;
 
     let local_task = db.get_task(entry.local_task_id)?;
-    let local_hash = local_task.map(|t| mapping::hash_task(&t)).unwrap_or_default();
+    let local_hash = local_task
+        .map(|t| mapping::hash_task(&t))
+        .unwrap_or_default();
     db.update_linear_sync(entry.local_task_id, &local_hash, remote_hash)?;
 
     if !quiet {
@@ -407,15 +483,13 @@ fn apply_remote_to_local(
     Ok(())
 }
 
-fn create_local_from_remote(
-    db: &mut Database,
-    issue: &LinearIssue,
-    quiet: bool,
-) -> Result<()> {
+fn create_local_from_remote(db: &mut Database, issue: &LinearIssue, quiet: bool) -> Result<()> {
     let status = mapping::status_from_linear(&issue.state);
     let priority = mapping::priority_from_linear(issue.priority);
     let tags = labels_to_tags(&issue.labels.nodes);
-    let due_date = issue.due_date.as_deref()
+    let due_date = issue
+        .due_date
+        .as_deref()
         .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
 
     let task = db.create_task(
@@ -431,15 +505,39 @@ fn create_local_from_remote(
     )?;
 
     if status == Status::Closed {
-        db.update_task(task.id, None, None, Some(Status::Closed), None, None, None, None, None, None, None, None)?;
+        db.update_task(
+            task.id,
+            None,
+            None,
+            Some(Status::Closed),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
     }
 
     let local_hash = mapping::hash_task(&task);
     let remote_hash = mapping::hash_issue(issue);
-    db.create_linear_sync(task.id, &issue.id, Some(&issue.identifier), &local_hash, &remote_hash)?;
+    db.create_linear_sync(
+        task.id,
+        &issue.id,
+        Some(&issue.identifier),
+        &local_hash,
+        &remote_hash,
+    )?;
 
     if !quiet {
-        println!("  {} Created <- {} ({})", "++".green(), issue.identifier, issue.title);
+        println!(
+            "  {} Created <- {} ({})",
+            "++".green(),
+            issue.identifier,
+            issue.title
+        );
     }
     Ok(())
 }
@@ -448,7 +546,13 @@ fn labels_to_tags(labels: &[LinearLabel]) -> Option<String> {
     if labels.is_empty() {
         None
     } else {
-        Some(labels.iter().map(|l| l.name.as_str()).collect::<Vec<_>>().join(","))
+        Some(
+            labels
+                .iter()
+                .map(|l| l.name.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        )
     }
 }
 
@@ -512,7 +616,10 @@ fn get_label_ids_for_task(
     // Also map tags to labels
     if let Some(tags) = &task.tags {
         for tag in tags.split(',').map(|t| t.trim()).filter(|t| !t.is_empty()) {
-            if let Some(label) = existing_labels.iter().find(|l| l.name.eq_ignore_ascii_case(tag)) {
+            if let Some(label) = existing_labels
+                .iter()
+                .find(|l| l.name.eq_ignore_ascii_case(tag))
+            {
                 if !label_ids.contains(&label.id) {
                     label_ids.push(label.id.clone());
                 }

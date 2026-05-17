@@ -1,23 +1,23 @@
-use rusqlite::Connection;
 use crate::error::Result;
+use rusqlite::Connection;
 
 const CURRENT_VERSION: i32 = 6;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     create_migrations_table(conn)?;
-    
+
     let version = get_current_version(conn)?;
-    
+
     if version < 1 {
         migrate_v1(conn)?;
         set_version(conn, 1)?;
     }
-    
+
     if version < 2 {
         migrate_v2(conn)?;
         set_version(conn, 2)?;
     }
-    
+
     if version < 3 {
         migrate_v3(conn)?;
         set_version(conn, 3)?;
@@ -59,17 +59,14 @@ fn get_current_version(conn: &Connection) -> Result<i32> {
         [],
         |row| row.get(0),
     )?;
-    
+
     if !exists {
         return Ok(0);
     }
-    
-    let result: std::result::Result<Option<i32>, rusqlite::Error> = conn.query_row(
-        "SELECT MAX(version) FROM _migrations",
-        [],
-        |row| row.get(0),
-    );
-    
+
+    let result: std::result::Result<Option<i32>, rusqlite::Error> =
+        conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0));
+
     match result {
         Ok(v) => Ok(v.unwrap_or(0)),
         Err(rusqlite::Error::InvalidColumnType(_, _, _)) => Ok(0),
@@ -99,7 +96,7 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
-    
+
     // Assignees table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS assignees (
@@ -111,7 +108,7 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
-    
+
     // Tasks table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tasks (
@@ -130,7 +127,7 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
-    
+
     // Dependencies table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS dependencies (
@@ -144,7 +141,7 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
-    
+
     // External references table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS external_refs (
@@ -157,7 +154,7 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
-    
+
     // Create indexes for performance
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tasks_epic ON tasks(epic_id)",
@@ -187,23 +184,20 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_external_refs_task ON external_refs(task_id)",
         [],
     )?;
-    
+
     Ok(())
 }
 
 fn migrate_v2(conn: &Connection) -> Result<()> {
     // Add tags column to tasks
-    conn.execute(
-        "ALTER TABLE tasks ADD COLUMN tags TEXT",
-        [],
-    )?;
-    
+    conn.execute("ALTER TABLE tasks ADD COLUMN tags TEXT", [])?;
+
     // Create index for tag search
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tasks_tags ON tasks(tags)",
         [],
     )?;
-    
+
     Ok(())
 }
 
@@ -219,7 +213,7 @@ fn migrate_v3(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
-    
+
     // Create index for task notes
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_task_notes_task ON task_notes(task_id)",

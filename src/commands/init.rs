@@ -1,9 +1,9 @@
-use std::fs;
-use std::path::Path;
-use colored::Colorize;
-use crate::commands::{SUCCESS_PREFIX, INFO_PREFIX};
+use crate::commands::{INFO_PREFIX, SUCCESS_PREFIX};
 use crate::db::Database;
 use crate::error::Result;
+use colored::Colorize;
+use std::fs;
+use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
@@ -223,13 +223,15 @@ fn ensure_project_initialized(mycelium_dir: &Path) -> Result<bool> {
 }
 
 pub fn execute(force_init: bool) -> Result<()> {
-    let cwd = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mycelium_dir = cwd.join(".mycelium");
     let agents_md_path = cwd.join("AGENTS.md");
 
     if mycelium_dir.exists() && !force_init {
-        println!("{} Mycelium project already initialized", INFO_PREFIX.blue());
+        println!(
+            "{} Mycelium project already initialized",
+            INFO_PREFIX.blue()
+        );
         return Ok(());
     }
 
@@ -237,8 +239,14 @@ pub fn execute(force_init: bool) -> Result<()> {
 
     // Create AGENTS.md if it doesn't exist
     if !agents_md_path.exists() {
-        fs::write(&agents_md_path, format!("# Agent Instructions\n{}", marker_block()))?;
-        println!("{} Created AGENTS.md with mycelium instructions", INFO_PREFIX.blue());
+        fs::write(
+            &agents_md_path,
+            format!("# Agent Instructions\n{}", marker_block()),
+        )?;
+        println!(
+            "{} Created AGENTS.md with mycelium instructions",
+            INFO_PREFIX.blue()
+        );
     } else {
         let existing = fs::read_to_string(&agents_md_path)?;
         match apply_marker_block(&existing, false) {
@@ -249,7 +257,8 @@ pub fn execute(force_init: bool) -> Result<()> {
             None => {
                 println!(
                     "{} AGENTS.md mycelium block already at v{} — no change",
-                    INFO_PREFIX.blue(), AGENTS_MD_VERSION
+                    INFO_PREFIX.blue(),
+                    AGENTS_MD_VERSION
                 );
             }
         }
@@ -259,16 +268,24 @@ pub fn execute(force_init: bool) -> Result<()> {
 }
 
 pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
-    let cwd = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mycelium_dir = cwd.join(".mycelium");
-    let agents_md_path = path.map(|p| cwd.join(p)).unwrap_or_else(|| cwd.join("AGENTS.md"));
+    let agents_md_path = path
+        .map(|p| cwd.join(p))
+        .unwrap_or_else(|| cwd.join("AGENTS.md"));
 
     ensure_project_initialized(&mycelium_dir)?;
 
     if !agents_md_path.exists() {
-        fs::write(&agents_md_path, format!("# Agent Instructions\n{}", marker_block()))?;
-        println!("{} Created AGENTS.md with mycelium instructions (v{})", SUCCESS_PREFIX.green(), AGENTS_MD_VERSION);
+        fs::write(
+            &agents_md_path,
+            format!("# Agent Instructions\n{}", marker_block()),
+        )?;
+        println!(
+            "{} Created AGENTS.md with mycelium instructions (v{})",
+            SUCCESS_PREFIX.green(),
+            AGENTS_MD_VERSION
+        );
         return Ok(());
     }
 
@@ -278,7 +295,9 @@ pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
             fs::write(&agents_md_path, updated)?;
             println!(
                 "{} {} AGENTS.md mycelium block (v{})",
-                SUCCESS_PREFIX.green(), action, AGENTS_MD_VERSION
+                SUCCESS_PREFIX.green(),
+                action,
+                AGENTS_MD_VERSION
             );
         }
         None => {
@@ -396,11 +415,16 @@ fn remove_mycelium_section_legacy(content: &str) -> String {
     let mut in_mycelium_section = false;
 
     for line in content.lines() {
-        if line.contains("## Project Management with Mycelium") || line.contains("## Mental Frameworks for Mycelium Usage") {
+        if line.contains("## Project Management with Mycelium")
+            || line.contains("## Mental Frameworks for Mycelium Usage")
+        {
             in_mycelium_section = true;
             continue;
         }
-        if in_mycelium_section && line.starts_with("## ") && !line.contains("Mental Frameworks for Mycelium") {
+        if in_mycelium_section
+            && line.starts_with("## ")
+            && !line.contains("Mental Frameworks for Mycelium")
+        {
             in_mycelium_section = false;
         }
         if !in_mycelium_section {

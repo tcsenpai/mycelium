@@ -3,23 +3,23 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-pub mod epic;
-pub mod task;
 pub mod assignee;
 pub mod dependency;
-pub mod external_ref;
-pub mod task_note;
+pub mod epic;
 pub mod epic_note;
+pub mod external_ref;
 pub mod followup;
+pub mod task;
+pub mod task_note;
 
-pub use epic::Epic;
-pub use task::Task;
 pub use assignee::Assignee;
 pub use dependency::Dependency;
-pub use external_ref::ExternalRef;
-pub use task_note::TaskNote;
+pub use epic::Epic;
 pub use epic_note::EpicNote;
+pub use external_ref::ExternalRef;
 pub use followup::{Followup, FollowupStatus};
+pub use task::Task;
+pub use task_note::TaskNote;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -151,7 +151,10 @@ impl std::str::FromStr for ExternalRefType {
             "github-issue" => Ok(ExternalRefType::GitHubIssue),
             "github-pr" => Ok(ExternalRefType::GitHubPr),
             "url" => Ok(ExternalRefType::Url),
-            _ => Err(crate::error::MyceliumError::InvalidInput(format!("Invalid ref type: {}", s))),
+            _ => Err(crate::error::MyceliumError::InvalidInput(format!(
+                "Invalid ref type: {}",
+                s
+            ))),
         }
     }
 }

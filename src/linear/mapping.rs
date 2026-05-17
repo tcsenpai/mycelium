@@ -1,9 +1,9 @@
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
-use crate::error::{MyceliumError, Result};
-use crate::models::{Priority, Status, Task};
 use super::client::{LinearIssue, LinearWorkflowState};
 use super::config::LinearConfig;
+use crate::error::{MyceliumError, Result};
+use crate::models::{Priority, Status, Task};
 
 /// Compute a hash of the key fields of a task for change detection.
 pub fn hash_task(task: &Task) -> String {
@@ -104,7 +104,10 @@ pub fn status_to_linear_state_id(
     };
 
     // Try exact name match first
-    if let Some(state) = states.iter().find(|s| s.name.eq_ignore_ascii_case(&target_name)) {
+    if let Some(state) = states
+        .iter()
+        .find(|s| s.name.eq_ignore_ascii_case(&target_name))
+    {
         return Ok(state.id.clone());
     }
 
@@ -157,7 +160,10 @@ pub fn find_linear_user_id(
 
     // Try matching by email
     if let Some(email) = assignee_email {
-        if let Some(user) = team_members.iter().find(|u| u.email.eq_ignore_ascii_case(email)) {
+        if let Some(user) = team_members
+            .iter()
+            .find(|u| u.email.eq_ignore_ascii_case(email))
+        {
             return Some(user.id.clone());
         }
     }
@@ -173,10 +179,9 @@ pub fn find_linear_user_id(
 
     // Try git username match against display name
     if let Some(github) = assignee_github {
-        if let Some(user) = team_members
-            .iter()
-            .find(|u| u.display_name.eq_ignore_ascii_case(github) || u.name.eq_ignore_ascii_case(github))
-        {
+        if let Some(user) = team_members.iter().find(|u| {
+            u.display_name.eq_ignore_ascii_case(github) || u.name.eq_ignore_ascii_case(github)
+        }) {
             return Some(user.id.clone());
         }
     }

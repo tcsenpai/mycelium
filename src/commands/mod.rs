@@ -1,19 +1,19 @@
-use colored::Colorize;
+use crate::cli::OutputFormat;
 use crate::db::Database;
 use crate::error::Result;
-use crate::cli::OutputFormat;
+use colored::Colorize;
 
-pub mod epic;
-pub mod task;
 pub mod assignee;
 pub mod deps;
+pub mod doctor;
+pub mod epic;
+pub mod export;
+pub mod followup;
 pub mod init;
+pub mod linear;
 pub mod list;
 pub mod summary;
-pub mod export;
-pub mod doctor;
-pub mod linear;
-pub mod followup;
+pub mod task;
 
 pub const ERROR_PREFIX: &str = "❌";
 pub const SUCCESS_PREFIX: &str = "✅";
@@ -35,11 +35,15 @@ pub fn ensure_initialized() -> Result<Database> {
     Database::open(db_path)
 }
 
-pub fn format_output<T: serde::Serialize>(data: &T, format: &OutputFormat, quiet: bool) -> Result<()> {
+pub fn format_output<T: serde::Serialize>(
+    data: &T,
+    format: &OutputFormat,
+    quiet: bool,
+) -> Result<()> {
     if quiet {
         return Ok(());
     }
-    
+
     match format {
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(data)?);
@@ -55,9 +59,9 @@ pub fn confirm(prompt: &str) -> bool {
     print!("{} {} [y/N] ", WARNING_PREFIX.yellow(), prompt);
     use std::io::Write;
     let _ = std::io::stdout().flush();
-    
+
     let mut input = String::new();
     std::io::stdin().read_line(&mut input).unwrap_or(0);
-    
+
     matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
 }

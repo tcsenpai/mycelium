@@ -91,7 +91,9 @@ impl LinearClient {
             .map_err(|e| MyceliumError::Http(e.to_string()))?;
 
         let status = resp.status();
-        let text = resp.text().map_err(|e| MyceliumError::Http(e.to_string()))?;
+        let text = resp
+            .text()
+            .map_err(|e| MyceliumError::Http(e.to_string()))?;
 
         if !status.is_success() {
             return Err(MyceliumError::LinearApi(format!(
@@ -255,7 +257,10 @@ impl LinearClient {
         let nodes: Vec<LinearIssue> = serde_json::from_value(issues_data["nodes"].clone())
             .map_err(|e| MyceliumError::LinearApi(e.to_string()))?;
 
-        let next_cursor = if issues_data["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false) {
+        let next_cursor = if issues_data["pageInfo"]["hasNextPage"]
+            .as_bool()
+            .unwrap_or(false)
+        {
             issues_data["pageInfo"]["endCursor"]
                 .as_str()
                 .map(|s| s.to_string())
@@ -275,12 +280,8 @@ impl LinearClient {
         let mut all = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
-            let (issues, next) = self.fetch_issues_filtered(
-                team_id,
-                filter_labels,
-                active_only,
-                cursor.as_deref(),
-            )?;
+            let (issues, next) =
+                self.fetch_issues_filtered(team_id, filter_labels, active_only, cursor.as_deref())?;
             all.extend(issues);
             if next.is_none() {
                 break;
@@ -427,10 +428,7 @@ impl LinearClient {
             input["labelIds"] = json!(l);
         }
 
-        let data = self.graphql(
-            query,
-            Some(json!({ "issueId": issue_id, "input": input })),
-        )?;
+        let data = self.graphql(query, Some(json!({ "issueId": issue_id, "input": input })))?;
         let issue = &data["issueUpdate"]["issue"];
         serde_json::from_value(issue.clone()).map_err(|e| MyceliumError::LinearApi(e.to_string()))
     }
@@ -511,7 +509,6 @@ impl LinearClient {
             })),
         )?;
         let project = &data["projectCreate"]["project"];
-        serde_json::from_value(project.clone())
-            .map_err(|e| MyceliumError::LinearApi(e.to_string()))
+        serde_json::from_value(project.clone()).map_err(|e| MyceliumError::LinearApi(e.to_string()))
     }
 }

@@ -1,6 +1,4 @@
-use clap::{Parser, Subcommand, Args};
-
-
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "myc")]
@@ -9,11 +7,11 @@ use clap::{Parser, Subcommand, Args};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
-    
+
     /// Output format (table, json)
     #[arg(global = true, short, long, default_value = "table")]
     pub format: OutputFormat,
-    
+
     /// Suppress non-error output
     #[arg(global = true, short, long)]
     pub quiet: bool,
@@ -34,33 +32,33 @@ pub enum Commands {
         #[arg(long)]
         path: Option<std::path::PathBuf>,
     },
-    
+
     /// Manage epics
     #[command(subcommand)]
     Epic(EpicCommands),
-    
+
     /// Manage tasks
     #[command(subcommand)]
     Task(TaskCommands),
-    
+
     /// Manage assignees
     #[command(subcommand)]
     Assignee(AssigneeCommands),
-    
+
     /// Manage dependencies
     #[command(subcommand)]
     Deps(DepsCommands),
-    
+
     /// List and filter tasks
     List(ListArgs),
-    
+
     /// Show project summary
     Summary,
-    
+
     /// Export data
     #[command(subcommand)]
     Export(ExportCommands),
-    
+
     /// Run health checks on the project
     Doctor {
         /// Automatically fix issues where possible
@@ -249,29 +247,29 @@ pub enum EpicCommands {
         #[arg(long)]
         user_info: Option<String>,
     },
-    
+
     /// List all epics
     List,
-    
+
     /// Show epic details
     Show {
         /// Epic ID
         id: i64,
     },
-    
+
     /// Update an epic
     Update {
         /// Epic ID
         id: i64,
-        
+
         /// New title
         #[arg(short, long)]
         title: Option<String>,
-        
+
         /// New description
         #[arg(short, long)]
         description: Option<String>,
-        
+
         /// New status
         #[arg(short, long, value_parser = ["open", "in_progress", "closed"])]
         status: Option<String>,
@@ -308,7 +306,7 @@ pub enum EpicCommands {
     Delete {
         /// Epic ID
         id: i64,
-        
+
         /// Force deletion without confirmation
         #[arg(long)]
         force: bool,
@@ -322,27 +320,27 @@ pub enum TaskCommands {
         /// Task title
         #[arg(short, long)]
         title: String,
-        
+
         /// Task description
         #[arg(short, long)]
         description: Option<String>,
-        
+
         /// Epic ID to assign to
         #[arg(short, long)]
         epic: Option<i64>,
-        
+
         /// Priority (low, medium, high, critical)
         #[arg(short, long, default_value = "medium")]
         priority: String,
-        
+
         /// Assignee ID
         #[arg(short, long)]
         assignee: Option<i64>,
-        
+
         /// Due date (YYYY-MM-DD)
         #[arg(short = 'u', long)]
         due: Option<String>,
-        
+
         /// Tags (comma-separated, e.g., "frontend,urgent")
         #[arg(short = 'g', long)]
         tags: Option<String>,
@@ -359,88 +357,88 @@ pub enum TaskCommands {
         #[arg(short = 'm', long)]
         template: Option<String>,
     },
-    
+
     /// List tasks
     List {
         /// Filter by epic ID
         #[arg(short, long)]
         epic: Option<i64>,
-        
+
         /// Filter by status (defaults to 'open')
         #[arg(short, long)]
         status: Option<String>,
-        
+
         /// Filter by priority
         #[arg(short, long)]
         priority: Option<String>,
-        
+
         /// Filter by assignee ID
         #[arg(short, long)]
         assignee: Option<i64>,
-        
+
         /// Show only blocked tasks
         #[arg(long)]
         blocked: bool,
-        
+
         /// Show only overdue tasks
         #[arg(long)]
         overdue: bool,
-        
+
         /// Filter by tag
         #[arg(short, long)]
         tag: Option<String>,
-        
+
         /// Show all tasks including closed (overrides default open filter)
         #[arg(long)]
         all: bool,
     },
-    
+
     /// Batch create tasks from JSON file
     Batch {
         /// JSON file path
         #[arg(short, long)]
         file: String,
     },
-    
+
     /// Show task details
     Show {
         /// Task ID
         id: i64,
     },
-    
+
     /// Update a task
     Update {
         /// Task ID
         id: i64,
-        
+
         /// New title
         #[arg(short, long)]
         title: Option<String>,
-        
+
         /// New description
         #[arg(short, long)]
         description: Option<String>,
-        
+
         /// New status
         #[arg(short, long)]
         status: Option<String>,
-        
+
         /// New priority
         #[arg(short, long)]
         priority: Option<String>,
-        
+
         /// New epic ID (use 0 to remove)
         #[arg(short, long)]
         epic: Option<i64>,
-        
+
         /// New assignee ID (use 0 to remove)
         #[arg(short, long)]
         assignee: Option<i64>,
-        
+
         /// New due date (YYYY-MM-DD)
         #[arg(short = 'u', long)]
         due: Option<String>,
-        
+
         /// New tags (comma-separated, use - to remove)
         #[arg(short = 'g', long)]
         tags: Option<String>,
@@ -462,72 +460,72 @@ pub enum TaskCommands {
     Delete {
         /// Task ID
         id: i64,
-        
+
         /// Force deletion without confirmation
         #[arg(long)]
         force: bool,
     },
-    
+
     /// Assign a task to someone
     Assign {
         /// Task ID
         task_id: i64,
-        
+
         /// Assignee ID (use 0 to unassign)
         assignee_id: i64,
     },
-    
+
     /// Link task to external resources
     #[command(subcommand)]
     Link(LinkCommands),
-    
+
     /// Unlink external reference
     Unlink {
         /// Reference ID
         ref_id: i64,
     },
-    
+
     /// Close a task
     Close {
         /// Task ID
         id: i64,
-        
+
         /// Force close even if blocked
         #[arg(long)]
         force: bool,
     },
-    
+
     /// Reopen a task
     Reopen {
         /// Task ID
         id: i64,
     },
-    
+
     /// Add a note to a task
     Note {
         /// Task ID
         task_id: i64,
-        
+
         /// Note content
         content: String,
     },
-    
+
     /// Show task notes
     Notes {
         /// Task ID
         task_id: i64,
     },
-    
+
     /// Clone a task
     Clone {
         /// Task ID to clone
         id: i64,
-        
+
         /// New title (optional, defaults to "Original (copy)")
         #[arg(short, long)]
         title: Option<String>,
     },
-    
+
     /// Batch operations on multiple tasks
     #[command(subcommand)]
     BatchOp(BatchOpCommands),
@@ -539,21 +537,21 @@ pub enum BatchOpCommands {
     Close {
         /// Task IDs to close
         ids: Vec<i64>,
-        
+
         /// Force close even if blocked
         #[arg(long)]
         force: bool,
     },
-    
+
     /// Add a tag to multiple tasks
     Tag {
         /// Tag to add
         tag: String,
-        
+
         /// Task IDs
         ids: Vec<i64>,
     },
-    
+
     /// Move multiple tasks to an epic
     Move {
         /// Epic ID (use 0 for no epic)
@@ -578,37 +576,37 @@ pub enum LinkCommands {
         /// Task ID
         #[arg(short, long)]
         task: i64,
-        
+
         /// GitHub reference (owner/repo#number)
         reference: String,
     },
-    
+
     /// Link to GitHub PR
     GithubPr {
         /// Task ID
         #[arg(short, long)]
         task: i64,
-        
+
         /// GitHub reference (owner/repo#number)
         reference: String,
     },
-    
+
     /// Link to URL
     Url {
         /// Task ID
         #[arg(short, long)]
         task: i64,
-        
+
         /// URL
         url: String,
     },
-    
+
     /// Mark task as blocking another
     Blocks {
         /// Task ID that blocks
         #[arg(short, long)]
         task: i64,
-        
+
         /// Task ID being blocked
         blocked: i64,
     },
@@ -621,30 +619,30 @@ pub enum AssigneeCommands {
         /// Assignee name
         #[arg(short, long)]
         name: String,
-        
+
         /// Email address
         #[arg(short, long)]
         email: Option<String>,
-        
+
         /// GitHub username
         #[arg(short, long)]
         github: Option<String>,
     },
-    
+
     /// List all assignees
     List,
-    
+
     /// Show assignee details
     Show {
         /// Assignee ID
         id: i64,
     },
-    
+
     /// Delete an assignee
     Delete {
         /// Assignee ID
         id: i64,
-        
+
         /// Force deletion without confirmation
         #[arg(short, long)]
         force: bool,
@@ -658,12 +656,12 @@ pub enum DepsCommands {
         /// Task ID
         task_id: i64,
     },
-    
+
     /// Remove a dependency
     Unlink {
         /// Task ID
         task_id: i64,
-        
+
         /// Task ID that was being blocked
         blocked_task_id: i64,
     },
@@ -674,31 +672,31 @@ pub struct ListArgs {
     /// Filter by epic ID
     #[arg(short, long)]
     pub epic: Option<i64>,
-    
+
     /// Filter by status (defaults to 'open')
     #[arg(short, long)]
     pub status: Option<String>,
-    
+
     /// Filter by priority
     #[arg(short, long)]
     pub priority: Option<String>,
-    
+
     /// Filter by assignee ID
     #[arg(short, long)]
     pub assignee: Option<i64>,
-    
+
     /// Show only blocked tasks
     #[arg(long)]
     pub blocked: bool,
-    
+
     /// Show only overdue tasks
     #[arg(long)]
     pub overdue: bool,
-    
+
     /// Filter by tag
     #[arg(short, long)]
     pub tag: Option<String>,
-    
+
     /// Show all tasks including closed (overrides default open filter)
     #[arg(long)]
     pub all: bool,
@@ -712,7 +710,7 @@ pub enum ExportCommands {
         #[arg(short, long)]
         output: Option<String>,
     },
-    
+
     /// Export to CSV
     Csv {
         /// Output file (defaults to stdout)
@@ -729,7 +727,7 @@ pub enum OutputFormat {
 
 impl std::str::FromStr for OutputFormat {
     type Err = String;
-    
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "table" => Ok(OutputFormat::Table),

@@ -1,22 +1,35 @@
-use colored::Colorize;
-use comfy_table::{Table, ContentArrangement};
-use crate::commands::{ensure_initialized, SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX, WARNING_PREFIX};
 use crate::cli::OutputFormat;
+use crate::commands::{
+    ensure_initialized, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX,
+};
 use crate::error::Result;
+use colored::Colorize;
+use comfy_table::{ContentArrangement, Table};
 
-pub fn create(name: &str, email: Option<&str>, github: Option<&str>, format: &OutputFormat, quiet: bool) -> Result<()> {
+pub fn create(
+    name: &str,
+    email: Option<&str>,
+    github: Option<&str>,
+    format: &OutputFormat,
+    quiet: bool,
+) -> Result<()> {
     let mut db = ensure_initialized()?;
     let assignee = db.create_assignee(name, email, github)?;
-    
+
     if quiet {
         println!("{}", assignee.id);
         return Ok(());
     }
-    
+
     match format {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&assignee)?),
         OutputFormat::Table => {
-            println!("{} Created assignee #{}: {}", SUCCESS_PREFIX.green(), assignee.id.to_string().cyan(), assignee.name.bold());
+            println!(
+                "{} Created assignee #{}: {}",
+                SUCCESS_PREFIX.green(),
+                assignee.id.to_string().cyan(),
+                assignee.name.bold()
+            );
         }
     }
     Ok(())
@@ -25,14 +38,14 @@ pub fn create(name: &str, email: Option<&str>, github: Option<&str>, format: &Ou
 pub fn list(format: &OutputFormat, quiet: bool) -> Result<()> {
     let db = ensure_initialized()?;
     let assignees = db.list_assignees_with_stats()?;
-    
+
     if quiet {
         for stat in &assignees {
             println!("{}", stat.assignee.id);
         }
         return Ok(());
     }
-    
+
     match format {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&assignees)?),
         OutputFormat::Table => {
@@ -40,16 +53,19 @@ pub fn list(format: &OutputFormat, quiet: bool) -> Result<()> {
                 println!("{} No assignees found.", INFO_PREFIX.blue());
                 return Ok(());
             }
-            
+
             let mut table = Table::new();
             table.set_content_arrangement(ContentArrangement::Dynamic);
             table.set_header(vec!["ID", "Name", "Email", "GitHub", "Tasks (Open/Total)"]);
-            
+
             for stat in assignees {
                 let email = stat.assignee.email.unwrap_or_else(|| "-".to_string());
-                let github = stat.assignee.github_username.unwrap_or_else(|| "-".to_string());
+                let github = stat
+                    .assignee
+                    .github_username
+                    .unwrap_or_else(|| "-".to_string());
                 let tasks = format!("{} / {}", stat.open_tasks, stat.total_tasks);
-                
+
                 table.add_row(vec![
                     stat.assignee.id.to_string(),
                     stat.assignee.name,
@@ -58,7 +74,7 @@ pub fn list(format: &OutputFormat, quiet: bool) -> Result<()> {
                     tasks,
                 ]);
             }
-            
+
             println!("{}", table);
         }
     }
@@ -67,19 +83,21 @@ pub fn list(format: &OutputFormat, quiet: bool) -> Result<()> {
 
 pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
     let db = ensure_initialized()?;
-    let assignee = db.get_assignee(id)?.ok_or_else(|| crate::error::MyceliumError::NotFound {
-        entity: "assignee".to_string(),
-        id: id.to_string(),
-    })?;
-    
+    let assignee = db
+        .get_assignee(id)?
+        .ok_or_else(|| crate::error::MyceliumError::NotFound {
+            entity: "assignee".to_string(),
+            id: id.to_string(),
+        })?;
+
     // Get tasks for this assignee
     let tasks = db.list_tasks(None, None, None, Some(id), false, false, None)?;
-    
+
     if quiet {
         println!("{}", assignee.id);
         return Ok(());
     }
-    
+
     match format {
         OutputFormat::Json => {
             let data = serde_json::json!({
@@ -89,7 +107,11 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&data)?);
         }
         OutputFormat::Table => {
-            println!("{} Assignee #{}", INFO_PREFIX.blue(), assignee.id.to_string().cyan().bold());
+            println!(
+                "{} Assignee #{}",
+                INFO_PREFIX.blue(),
+                assignee.id.to_string().cyan().bold()
+            );
             println!("  Name: {}", assignee.name.bold());
             if let Some(email) = &assignee.email {
                 println!("  Email: {}", email);
@@ -98,14 +120,14 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
                 println!("  GitHub: @{}", github);
             }
             println!();
-            
+
             if tasks.is_empty() {
                 println!("  No assigned tasks.");
             } else {
                 println!("  Assigned tasks ({}):", tasks.len());
                 let mut table = Table::new();
                 table.set_header(vec!["ID", "Title", "Status", "Priority"]);
-                
+
                 for task in tasks {
                     table.add_row(vec![
                         task.id.to_string(),
@@ -123,27 +145,42 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
 
 pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
-    
-    let assignee = db.get_assignee(id)?.ok_or_else(|| crate::error::MyceliumError::NotFound {
-        entity: "assignee".to_string(),
-        id: id.to_string(),
-    })?;
-    
+
+    let assignee = db
+        .get_assignee(id)?
+        .ok_or_else(|| crate::error::MyceliumError::NotFound {
+            entity: "assignee".to_string(),
+            id: id.to_string(),
+        })?;
+
     // Check for assigned tasks
     let tasks = db.list_tasks(None, None, None, Some(id), false, false, None)?;
-    
+
     if !force && !tasks.is_empty() {
-        println!("{} Assignee '{}' has {} task(s) assigned.", WARNING_PREFIX.yellow(), assignee.name, tasks.len());
-        if !crate::commands::confirm(&format!("Delete assignee #{}? Tasks will be unassigned.", id)) {
+        println!(
+            "{} Assignee '{}' has {} task(s) assigned.",
+            WARNING_PREFIX.yellow(),
+            assignee.name,
+            tasks.len()
+        );
+        if !crate::commands::confirm(&format!(
+            "Delete assignee #{}? Tasks will be unassigned.",
+            id
+        )) {
             println!("Cancelled.");
             return Ok(());
         }
     }
-    
+
     db.delete_assignee(id)?;
-    
+
     if !quiet {
-        println!("{} Deleted assignee #{}: {}", SUCCESS_PREFIX.green(), id.to_string().cyan(), assignee.name);
+        println!(
+            "{} Deleted assignee #{}: {}",
+            SUCCESS_PREFIX.green(),
+            id.to_string().cyan(),
+            assignee.name
+        );
     }
     Ok(())
 }

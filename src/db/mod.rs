@@ -8,32 +8,34 @@ mod migrations;
 
 /// Parse a status string from the database, returning a rusqlite error on failure.
 fn parse_status(s: &str) -> std::result::Result<Status, rusqlite::Error> {
-    s.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-        0, rusqlite::types::Type::Text, Box::new(e),
-    ))
+    s.parse().map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    })
 }
 
 /// Parse a priority string from the database, returning a rusqlite error on failure.
 fn parse_priority(s: &str) -> std::result::Result<Priority, rusqlite::Error> {
-    s.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-        0, rusqlite::types::Type::Text, Box::new(e),
-    ))
+    s.parse().map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    })
 }
 
 /// Parse an RFC3339 timestamp from the database into a local DateTime.
-fn parse_timestamp(s: &str) -> std::result::Result<chrono::DateTime<chrono::Local>, rusqlite::Error> {
+fn parse_timestamp(
+    s: &str,
+) -> std::result::Result<chrono::DateTime<chrono::Local>, rusqlite::Error> {
     chrono::DateTime::parse_from_rfc3339(s)
         .map(|dt| dt.with_timezone(&chrono::Local))
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-            0, rusqlite::types::Type::Text, Box::new(e),
-        ))
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+        })
 }
 
 /// Parse an ExternalRefType string from the database.
 fn parse_ref_type(s: &str) -> std::result::Result<ExternalRefType, rusqlite::Error> {
-    s.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-        0, rusqlite::types::Type::Text, Box::new(e),
-    ))
+    s.parse().map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    })
 }
 
 pub struct Database {
@@ -46,7 +48,7 @@ impl Database {
         conn.execute_batch("PRAGMA foreign_keys = ON")?;
         conn.execute_batch("PRAGMA journal_mode = WAL")?;
         conn.execute_batch("PRAGMA synchronous = NORMAL")?;
-        
+
         let mut db = Self { conn };
         db.migrate()?;
         Ok(db)
@@ -55,7 +57,7 @@ impl Database {
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys = ON")?;
-        
+
         let mut db = Self { conn };
         db.migrate()?;
         Ok(db)
@@ -64,7 +66,7 @@ impl Database {
     pub fn migrate(&mut self) -> Result<()> {
         migrations::run_migrations(&mut self.conn)
     }
-    
+
     pub fn get_conn(&self) -> &Connection {
         &self.conn
     }
@@ -80,7 +82,13 @@ impl Database {
     }
 
     // Epic operations
-    pub fn create_epic(&mut self, title: &str, description: Option<&str>, notes: Option<&str>, user_info: Option<&str>) -> Result<Epic> {
+    pub fn create_epic(
+        &mut self,
+        title: &str,
+        description: Option<&str>,
+        notes: Option<&str>,
+        user_info: Option<&str>,
+    ) -> Result<Epic> {
         let now = chrono::Local::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO epics (title, description, status, notes, user_info, created_at, updated_at)
@@ -88,11 +96,12 @@ impl Database {
             (title, description, notes, user_info, now),
         )?;
         let id = self.conn.last_insert_rowid();
-        self.get_epic(id)
-            .map(|e| e.ok_or_else(|| MyceliumError::NotFound { 
-                entity: "epic".to_string(), 
-                id: id.to_string() 
-            }))?
+        self.get_epic(id).map(|e| {
+            e.ok_or_else(|| MyceliumError::NotFound {
+                entity: "epic".to_string(),
+                id: id.to_string(),
+            })
+        })?
     }
 
     pub fn get_epic(&self, id: i64) -> Result<Option<Epic>> {
@@ -140,7 +149,9 @@ impl Database {
             })
         })?;
 
-        epics.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        epics
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     pub fn list_epics_with_summary(&self) -> Result<Vec<epic::EpicSummary>> {
@@ -175,7 +186,9 @@ impl Database {
             })
         })?;
 
-        summaries.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        summaries
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     pub fn update_epic(
@@ -191,29 +204,48 @@ impl Database {
         let now = chrono::Local::now().to_rfc3339();
 
         if let Some(title) = title {
-            self.conn.execute("UPDATE epics SET title = ?1, updated_at = ?2 WHERE id = ?3", (title, &now, id))?;
+            self.conn.execute(
+                "UPDATE epics SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                (title, &now, id),
+            )?;
         }
         if let Some(description) = description {
-            self.conn.execute("UPDATE epics SET description = ?1, updated_at = ?2 WHERE id = ?3", (description, &now, id))?;
+            self.conn.execute(
+                "UPDATE epics SET description = ?1, updated_at = ?2 WHERE id = ?3",
+                (description, &now, id),
+            )?;
         }
         if let Some(status) = status {
-            self.conn.execute("UPDATE epics SET status = ?1, updated_at = ?2 WHERE id = ?3", (status.to_string(), &now, id))?;
+            self.conn.execute(
+                "UPDATE epics SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                (status.to_string(), &now, id),
+            )?;
         }
         if let Some(notes) = notes {
-            self.conn.execute("UPDATE epics SET notes = ?1, updated_at = ?2 WHERE id = ?3", (notes, &now, id))?;
+            self.conn.execute(
+                "UPDATE epics SET notes = ?1, updated_at = ?2 WHERE id = ?3",
+                (notes, &now, id),
+            )?;
         }
         if let Some(user_info) = user_info {
-            self.conn.execute("UPDATE epics SET user_info = ?1, updated_at = ?2 WHERE id = ?3", (user_info, &now, id))?;
+            self.conn.execute(
+                "UPDATE epics SET user_info = ?1, updated_at = ?2 WHERE id = ?3",
+                (user_info, &now, id),
+            )?;
         }
         if let Some(agent_questions) = agent_questions {
-            self.conn.execute("UPDATE epics SET agent_questions = ?1, updated_at = ?2 WHERE id = ?3", (agent_questions, &now, id))?;
+            self.conn.execute(
+                "UPDATE epics SET agent_questions = ?1, updated_at = ?2 WHERE id = ?3",
+                (agent_questions, &now, id),
+            )?;
         }
-        
-        self.get_epic(id)
-            .map(|e| e.ok_or_else(|| MyceliumError::NotFound { 
-                entity: "epic".to_string(), 
-                id: id.to_string() 
-            }))?
+
+        self.get_epic(id).map(|e| {
+            e.ok_or_else(|| MyceliumError::NotFound {
+                entity: "epic".to_string(),
+                id: id.to_string(),
+            })
+        })?
     }
 
     pub fn delete_epic(&mut self, id: i64) -> Result<()> {
@@ -242,13 +274,14 @@ impl Database {
              VALUES (?1, ?2, 'open', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
             (title, description, priority.to_string(), epic_id, assignee_id, due_date_str, tags, notes, user_info, now),
         )?;
-        
+
         let id = self.conn.last_insert_rowid();
-        self.get_task(id)
-            .map(|t| t.ok_or_else(|| MyceliumError::NotFound { 
-                entity: "task".to_string(), 
-                id: id.to_string() 
-            }))?
+        self.get_task(id).map(|t| {
+            t.ok_or_else(|| MyceliumError::NotFound {
+                entity: "task".to_string(),
+                id: id.to_string(),
+            })
+        })?
     }
 
     pub fn get_task(&self, id: i64) -> Result<Option<Task>> {
@@ -267,7 +300,8 @@ impl Database {
                 priority: parse_priority(&row.get::<_, String>(4)?)?,
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
-                due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+                due_date: due_date
+                    .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
                 tags: row.get(8)?,
                 notes: row.get(9)?,
                 user_info: row.get(10)?,
@@ -351,7 +385,8 @@ impl Database {
                 priority: parse_priority(&row.get::<_, String>(4)?)?,
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
-                due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+                due_date: due_date
+                    .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
                 tags: row.get(8)?,
                 notes: row.get(9)?,
                 user_info: row.get(10)?,
@@ -361,11 +396,15 @@ impl Database {
             })
         })?;
 
-        let mut result: Vec<Task> = tasks.collect::<std::result::Result<Vec<Task>, rusqlite::Error>>().map_err(|e: rusqlite::Error| -> crate::error::MyceliumError { e.into() })?;
+        let mut result: Vec<Task> = tasks
+            .collect::<std::result::Result<Vec<Task>, rusqlite::Error>>()
+            .map_err(|e: rusqlite::Error| -> crate::error::MyceliumError { e.into() })?;
 
         if blocked_only {
             result.retain(|t| {
-                self.get_open_blockers(t.id).map(|v| !v.is_empty()).unwrap_or(false)
+                self.get_open_blockers(t.id)
+                    .map(|v| !v.is_empty())
+                    .unwrap_or(false)
             });
         }
 
@@ -390,45 +429,79 @@ impl Database {
         let now = chrono::Local::now().to_rfc3339();
 
         if let Some(title) = title {
-            self.conn.execute("UPDATE tasks SET title = ?1, updated_at = ?2 WHERE id = ?3", (title, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                (title, &now, id),
+            )?;
         }
         if let Some(description) = description {
-            self.conn.execute("UPDATE tasks SET description = ?1, updated_at = ?2 WHERE id = ?3", (description, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET description = ?1, updated_at = ?2 WHERE id = ?3",
+                (description, &now, id),
+            )?;
         }
         if let Some(status) = status {
-            self.conn.execute("UPDATE tasks SET status = ?1, updated_at = ?2 WHERE id = ?3", (status.to_string(), &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                (status.to_string(), &now, id),
+            )?;
         }
         if let Some(priority) = priority {
-            self.conn.execute("UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3", (priority.to_string(), &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3",
+                (priority.to_string(), &now, id),
+            )?;
         }
         if let Some(epic_id) = epic_id {
-            self.conn.execute("UPDATE tasks SET epic_id = ?1, updated_at = ?2 WHERE id = ?3", (epic_id, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET epic_id = ?1, updated_at = ?2 WHERE id = ?3",
+                (epic_id, &now, id),
+            )?;
         }
         if let Some(assignee_id) = assignee_id {
-            self.conn.execute("UPDATE tasks SET assignee_id = ?1, updated_at = ?2 WHERE id = ?3", (assignee_id, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET assignee_id = ?1, updated_at = ?2 WHERE id = ?3",
+                (assignee_id, &now, id),
+            )?;
         }
         if let Some(due_date) = due_date {
             let due_str = due_date.map(|d| d.to_string());
-            self.conn.execute("UPDATE tasks SET due_date = ?1, updated_at = ?2 WHERE id = ?3", (due_str, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET due_date = ?1, updated_at = ?2 WHERE id = ?3",
+                (due_str, &now, id),
+            )?;
         }
         if let Some(tags) = tags {
-            self.conn.execute("UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3", (tags, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3",
+                (tags, &now, id),
+            )?;
         }
         if let Some(notes) = notes {
-            self.conn.execute("UPDATE tasks SET notes = ?1, updated_at = ?2 WHERE id = ?3", (notes, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET notes = ?1, updated_at = ?2 WHERE id = ?3",
+                (notes, &now, id),
+            )?;
         }
         if let Some(user_info) = user_info {
-            self.conn.execute("UPDATE tasks SET user_info = ?1, updated_at = ?2 WHERE id = ?3", (user_info, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET user_info = ?1, updated_at = ?2 WHERE id = ?3",
+                (user_info, &now, id),
+            )?;
         }
         if let Some(agent_questions) = agent_questions {
-            self.conn.execute("UPDATE tasks SET agent_questions = ?1, updated_at = ?2 WHERE id = ?3", (agent_questions, &now, id))?;
+            self.conn.execute(
+                "UPDATE tasks SET agent_questions = ?1, updated_at = ?2 WHERE id = ?3",
+                (agent_questions, &now, id),
+            )?;
         }
-        
-        self.get_task(id)
-            .map(|t| t.ok_or_else(|| MyceliumError::NotFound { 
-                entity: "task".to_string(), 
-                id: id.to_string() 
-            }))?
+
+        self.get_task(id).map(|t| {
+            t.ok_or_else(|| MyceliumError::NotFound {
+                entity: "task".to_string(),
+                id: id.to_string(),
+            })
+        })?
     }
 
     pub fn delete_task(&mut self, id: i64) -> Result<()> {
@@ -437,26 +510,32 @@ impl Database {
     }
 
     // Assignee operations
-    pub fn create_assignee(&mut self, name: &str, email: Option<&str>, github: Option<&str>) -> Result<Assignee> {
+    pub fn create_assignee(
+        &mut self,
+        name: &str,
+        email: Option<&str>,
+        github: Option<&str>,
+    ) -> Result<Assignee> {
         self.conn.execute(
             "INSERT INTO assignees (name, email, github_username, created_at) 
              VALUES (?1, ?2, ?3, ?4)",
             (name, email, github, chrono::Local::now().to_rfc3339()),
         )?;
-        
+
         let id = self.conn.last_insert_rowid();
-        self.get_assignee(id)
-            .map(|a| a.ok_or_else(|| MyceliumError::NotFound { 
-                entity: "assignee".to_string(), 
-                id: id.to_string() 
-            }))?
+        self.get_assignee(id).map(|a| {
+            a.ok_or_else(|| MyceliumError::NotFound {
+                entity: "assignee".to_string(),
+                id: id.to_string(),
+            })
+        })?
     }
 
     pub fn get_assignee(&self, id: i64) -> Result<Option<Assignee>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, email, github_username, created_at FROM assignees WHERE id = ?1"
+            "SELECT id, name, email, github_username, created_at FROM assignees WHERE id = ?1",
         )?;
-        
+
         let assignee = stmt.query_row([id], |row| {
             Ok(Assignee {
                 id: row.get(0)?,
@@ -476,9 +555,9 @@ impl Database {
 
     pub fn list_assignees(&self) -> Result<Vec<Assignee>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, email, github_username, created_at FROM assignees ORDER BY name"
+            "SELECT id, name, email, github_username, created_at FROM assignees ORDER BY name",
         )?;
-        
+
         let assignees = stmt.query_map([], |row| {
             Ok(Assignee {
                 id: row.get(0)?,
@@ -489,7 +568,9 @@ impl Database {
             })
         })?;
 
-        assignees.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        assignees
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     pub fn list_assignees_with_stats(&self) -> Result<Vec<assignee::AssigneeWithStats>> {
@@ -501,9 +582,9 @@ impl Database {
              FROM assignees a
              LEFT JOIN tasks t ON t.assignee_id = a.id
              GROUP BY a.id
-             ORDER BY a.name"
+             ORDER BY a.name",
         )?;
-        
+
         let stats = stmt.query_map([], |row| {
             Ok(assignee::AssigneeWithStats {
                 assignee: Assignee {
@@ -518,11 +599,14 @@ impl Database {
             })
         })?;
 
-        stats.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        stats
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     pub fn delete_assignee(&mut self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM assignees WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM assignees WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -530,15 +614,20 @@ impl Database {
     pub fn add_dependency(&mut self, task_id: i64, depends_on_task_id: i64) -> Result<()> {
         // Check for circular dependency
         if self.would_create_cycle(task_id, depends_on_task_id)? {
-            return Err(MyceliumError::CircularDependency(
-                format!("Task {} already depends on task {} (directly or indirectly)", depends_on_task_id, task_id)
-            ));
+            return Err(MyceliumError::CircularDependency(format!(
+                "Task {} already depends on task {} (directly or indirectly)",
+                depends_on_task_id, task_id
+            )));
         }
-        
+
         self.conn.execute(
             "INSERT INTO dependencies (task_id, depends_on_task_id, created_at) 
              VALUES (?1, ?2, ?3)",
-            (task_id, depends_on_task_id, chrono::Local::now().to_rfc3339()),
+            (
+                task_id,
+                depends_on_task_id,
+                chrono::Local::now().to_rfc3339(),
+            ),
         )?;
         Ok(())
     }
@@ -552,32 +641,34 @@ impl Database {
     }
 
     pub fn get_blocking_tasks(&self, task_id: i64) -> Result<Vec<i64>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT depends_on_task_id FROM dependencies WHERE task_id = ?1"
-        )?;
-        
+        let mut stmt = self
+            .conn
+            .prepare("SELECT depends_on_task_id FROM dependencies WHERE task_id = ?1")?;
+
         let ids = stmt.query_map([task_id], |row| row.get(0))?;
-        ids.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        ids.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     pub fn get_blocked_tasks(&self, task_id: i64) -> Result<Vec<i64>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT task_id FROM dependencies WHERE depends_on_task_id = ?1"
-        )?;
-        
+        let mut stmt = self
+            .conn
+            .prepare("SELECT task_id FROM dependencies WHERE depends_on_task_id = ?1")?;
+
         let ids = stmt.query_map([task_id], |row| row.get(0))?;
-        ids.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        ids.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     pub fn get_all_dependencies(&self, task_id: i64) -> Result<dependency::DependencyChain> {
         let blocking = self.get_blocking_tasks(task_id)?;
         let blocked = self.get_blocked_tasks(task_id)?;
-        
+
         // Get transitive dependencies
         let mut all_deps = vec![];
         let mut to_check = blocking.clone();
         let mut visited = std::collections::HashSet::new();
-        
+
         while let Some(check_id) = to_check.pop() {
             if visited.insert(check_id) {
                 all_deps.push(check_id);
@@ -585,7 +676,7 @@ impl Database {
                 to_check.extend(deps);
             }
         }
-        
+
         Ok(dependency::DependencyChain {
             task_id,
             blocked_by: blocking,
@@ -603,7 +694,7 @@ impl Database {
     pub fn get_open_blockers(&self, task_id: i64) -> Result<Vec<Task>> {
         let blocking_ids = self.get_blocking_tasks(task_id)?;
         let mut open_blockers = vec![];
-        
+
         for id in blocking_ids {
             if let Some(task) = self.get_task(id)? {
                 if task.status == Status::Open {
@@ -611,59 +702,63 @@ impl Database {
                 }
             }
         }
-        
+
         Ok(open_blockers)
     }
 
     /// Get dependencies for multiple tasks at once
     /// Returns a map of task_id -> (blocked_by_ids, blocks_ids)
-    pub fn get_dependencies_for_tasks(&self, task_ids: &[i64]) -> Result<std::collections::HashMap<i64, (Vec<i64>, Vec<i64>)>> {
+    pub fn get_dependencies_for_tasks(
+        &self,
+        task_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, (Vec<i64>, Vec<i64>)>> {
         use std::collections::HashMap;
-        
+
         if task_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        
+
         let placeholders = task_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        
+
         // Get all blocking relationships for these tasks
         let sql = format!(
             "SELECT task_id, depends_on_task_id FROM dependencies 
              WHERE task_id IN ({}) OR depends_on_task_id IN ({})",
             placeholders, placeholders
         );
-        
+
         let mut stmt = self.conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::ToSql> = task_ids.iter()
+        let params: Vec<&dyn rusqlite::ToSql> = task_ids
+            .iter()
             .chain(task_ids.iter())
             .map(|id| id as &dyn rusqlite::ToSql)
             .collect();
-        
+
         let mut result: HashMap<i64, (Vec<i64>, Vec<i64>)> = HashMap::new();
-        
+
         // Initialize empty entries for all task IDs
         for &id in task_ids {
             result.insert(id, (vec![], vec![]));
         }
-        
+
         let rows = stmt.query_map(&*params, |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
         })?;
-        
+
         for row in rows {
             let (task_id, depends_on_id) = row?;
-            
+
             // task_id is blocked by depends_on_id
             if task_ids.contains(&task_id) {
                 result.entry(task_id).or_default().0.push(depends_on_id);
             }
-            
+
             // depends_on_id blocks task_id
             if task_ids.contains(&depends_on_id) {
                 result.entry(depends_on_id).or_default().1.push(task_id);
             }
         }
-        
+
         Ok(result)
     }
 
@@ -674,22 +769,21 @@ impl Database {
             "INSERT INTO task_notes (task_id, content, created_at) VALUES (?1, ?2, ?3)",
             (task_id, content, &now),
         )?;
-        
 
-        
         let id = self.conn.last_insert_rowid();
-        self.get_task_note(id)
-            .map(|n| n.ok_or_else(|| MyceliumError::NotFound { 
-                entity: "task_note".to_string(), 
-                id: id.to_string() 
-            }))?
+        self.get_task_note(id).map(|n| {
+            n.ok_or_else(|| MyceliumError::NotFound {
+                entity: "task_note".to_string(),
+                id: id.to_string(),
+            })
+        })?
     }
 
     pub fn get_task_note(&self, id: i64) -> Result<Option<TaskNote>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, task_id, content, created_at FROM task_notes WHERE id = ?1"
-        )?;
-        
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, task_id, content, created_at FROM task_notes WHERE id = ?1")?;
+
         let note = stmt.query_row([id], |row| {
             Ok(TaskNote {
                 id: row.get(0)?,
@@ -710,7 +804,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT id, task_id, content, created_at FROM task_notes WHERE task_id = ?1 ORDER BY created_at DESC"
         )?;
-        
+
         let notes = stmt.query_map([task_id], |row| {
             Ok(TaskNote {
                 id: row.get(0)?,
@@ -720,11 +814,14 @@ impl Database {
             })
         })?;
 
-        notes.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        notes
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     pub fn delete_task_note(&mut self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM task_notes WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM task_notes WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -737,17 +834,18 @@ impl Database {
         )?;
 
         let id = self.conn.last_insert_rowid();
-        self.get_epic_note(id)
-            .map(|n| n.ok_or_else(|| MyceliumError::NotFound {
+        self.get_epic_note(id).map(|n| {
+            n.ok_or_else(|| MyceliumError::NotFound {
                 entity: "epic_note".to_string(),
-                id: id.to_string()
-            }))?
+                id: id.to_string(),
+            })
+        })?
     }
 
     pub fn get_epic_note(&self, id: i64) -> Result<Option<EpicNote>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, epic_id, content, created_at FROM epic_notes WHERE id = ?1"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, epic_id, content, created_at FROM epic_notes WHERE id = ?1")?;
 
         let note = stmt.query_row([id], |row| {
             Ok(EpicNote {
@@ -779,14 +877,16 @@ impl Database {
             })
         })?;
 
-        notes.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        notes
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     // Batch operations
     pub fn batch_close_tasks(&mut self, task_ids: &[i64], force: bool) -> Result<Vec<Task>> {
         let mut closed_tasks = Vec::new();
         let now = chrono::Local::now().to_rfc3339();
-        
+
         for &id in task_ids {
             // Check for blockers unless force is true
             if !force {
@@ -795,27 +895,27 @@ impl Database {
                     continue; // Skip this task if blocked
                 }
             }
-            
+
             // Update task status
             self.conn.execute(
                 "UPDATE tasks SET status = 'closed', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
                 (&now, id),
             )?;
-            
+
             if let Ok(Some(task)) = self.get_task(id) {
                 if task.status == Status::Closed {
                     closed_tasks.push(task);
                 }
             }
         }
-        
+
         Ok(closed_tasks)
     }
 
     pub fn batch_add_tag(&mut self, task_ids: &[i64], tag: &str) -> Result<Vec<Task>> {
         let mut updated_tasks = Vec::new();
         let now = chrono::Local::now().to_rfc3339();
-        
+
         for &id in task_ids {
             if let Ok(Some(task)) = self.get_task(id) {
                 let current_tags = task.tags.unwrap_or_default();
@@ -826,61 +926,67 @@ impl Database {
                 } else {
                     format!("{}, {}", current_tags, tag)
                 };
-                
+
                 self.conn.execute(
                     "UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3",
                     (&new_tags, &now, id),
                 )?;
-                
+
                 if let Ok(Some(updated)) = self.get_task(id) {
                     updated_tasks.push(updated);
                 }
             }
         }
-        
+
         Ok(updated_tasks)
     }
 
-    pub fn batch_move_to_epic(&mut self, task_ids: &[i64], epic_id: Option<i64>) -> Result<Vec<Task>> {
+    pub fn batch_move_to_epic(
+        &mut self,
+        task_ids: &[i64],
+        epic_id: Option<i64>,
+    ) -> Result<Vec<Task>> {
         let mut updated_tasks = Vec::new();
         let now = chrono::Local::now().to_rfc3339();
-        
+
         // Verify epic exists if specified
         if let Some(eid) = epic_id {
             if self.get_epic(eid)?.is_none() {
-                return Err(MyceliumError::NotFound { 
-                    entity: "epic".to_string(), 
-                    id: eid.to_string() 
+                return Err(MyceliumError::NotFound {
+                    entity: "epic".to_string(),
+                    id: eid.to_string(),
                 });
             }
         }
-        
+
         for &id in task_ids {
             self.conn.execute(
                 "UPDATE tasks SET epic_id = ?1, updated_at = ?2 WHERE id = ?3",
                 (epic_id, &now, id),
             )?;
-            
+
             if let Ok(Some(updated)) = self.get_task(id) {
                 updated_tasks.push(updated);
             }
         }
-        
+
         Ok(updated_tasks)
     }
 
     // Task cloning
     pub fn clone_task(&mut self, task_id: i64, new_title: Option<&str>) -> Result<Task> {
-        let original = self.get_task(task_id)?.ok_or_else(|| MyceliumError::NotFound { 
-            entity: "task".to_string(), 
-            id: task_id.to_string() 
-        })?;
-        
+        let original = self
+            .get_task(task_id)?
+            .ok_or_else(|| MyceliumError::NotFound {
+                entity: "task".to_string(),
+                id: task_id.to_string(),
+            })?;
+
         let default_title = format!("{} (copy)", original.title);
         let title = new_title.unwrap_or(&default_title);
         let now = chrono::Local::now();
         let now_str = now.to_rfc3339();
-        
+
         self.conn.execute(
             "INSERT INTO tasks (title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, created_at, updated_at)
              VALUES (?1, ?2, 'open', ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?9)",
@@ -896,43 +1002,55 @@ impl Database {
                 &now_str,
             ),
         )?;
-        
+
         let new_id = self.conn.last_insert_rowid();
-        
+
         // Clone external references
         let refs = self.list_external_refs(task_id)?;
         for ext_ref in refs {
             self.add_external_ref(new_id, ext_ref.ref_type, &ext_ref.reference)?;
         }
-        
-        self.get_task(new_id)
-            .map(|t| t.ok_or_else(|| MyceliumError::NotFound { 
-                entity: "task".to_string(), 
-                id: new_id.to_string() 
-            }))?
+
+        self.get_task(new_id).map(|t| {
+            t.ok_or_else(|| MyceliumError::NotFound {
+                entity: "task".to_string(),
+                id: new_id.to_string(),
+            })
+        })?
     }
 
     // External reference operations
-    pub fn add_external_ref(&mut self, task_id: i64, ref_type: ExternalRefType, reference: &str) -> Result<ExternalRef> {
+    pub fn add_external_ref(
+        &mut self,
+        task_id: i64,
+        ref_type: ExternalRefType,
+        reference: &str,
+    ) -> Result<ExternalRef> {
         self.conn.execute(
             "INSERT INTO external_refs (task_id, ref_type, reference, created_at) 
              VALUES (?1, ?2, ?3, ?4)",
-            (task_id, ref_type.to_string(), reference, chrono::Local::now().to_rfc3339()),
+            (
+                task_id,
+                ref_type.to_string(),
+                reference,
+                chrono::Local::now().to_rfc3339(),
+            ),
         )?;
-        
+
         let id = self.conn.last_insert_rowid();
-        self.get_external_ref(id)
-            .map(|r| r.ok_or_else(|| MyceliumError::NotFound { 
-                entity: "external_ref".to_string(), 
-                id: id.to_string() 
-            }))?
+        self.get_external_ref(id).map(|r| {
+            r.ok_or_else(|| MyceliumError::NotFound {
+                entity: "external_ref".to_string(),
+                id: id.to_string(),
+            })
+        })?
     }
 
     pub fn get_external_ref(&self, id: i64) -> Result<Option<ExternalRef>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, task_id, ref_type, reference, created_at FROM external_refs WHERE id = ?1"
+            "SELECT id, task_id, ref_type, reference, created_at FROM external_refs WHERE id = ?1",
         )?;
-        
+
         let ext_ref = stmt.query_row([id], |row| {
             Ok(ExternalRef {
                 id: row.get(0)?,
@@ -955,9 +1073,9 @@ impl Database {
             "SELECT id, task_id, ref_type, reference, created_at 
              FROM external_refs 
              WHERE task_id = ?1
-             ORDER BY created_at"
+             ORDER BY created_at",
         )?;
-        
+
         let refs = stmt.query_map([task_id], |row| {
             Ok(ExternalRef {
                 id: row.get(0)?,
@@ -968,42 +1086,50 @@ impl Database {
             })
         })?;
 
-        refs.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        refs.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     pub fn remove_external_ref(&mut self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM external_refs WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM external_refs WHERE id = ?1", [id])?;
         Ok(())
     }
 
     // Summary operations
     pub fn get_summary(&self) -> Result<Summary> {
-        let total_epics: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM epics", [], |row| row.get(0)
-        )?;
-        
+        let total_epics: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM epics", [], |row| row.get(0))?;
+
         let open_epics: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM epics WHERE status = 'open'", [], |row| row.get(0)
+            "SELECT COUNT(*) FROM epics WHERE status = 'open'",
+            [],
+            |row| row.get(0),
         )?;
-        
-        let total_tasks: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM tasks", [], |row| row.get(0)
-        )?;
-        
+
+        let total_tasks: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
+
         let open_tasks: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'open'", [], |row| row.get(0)
+            "SELECT COUNT(*) FROM tasks WHERE status = 'open'",
+            [],
+            |row| row.get(0),
         )?;
-        
+
         let overdue_tasks: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM tasks WHERE status = 'open' AND due_date < ?1",
             [chrono::Local::now().naive_local().date().to_string()],
-            |row| row.get(0)
+            |row| row.get(0),
         )?;
-        
+
         let blocked_tasks: i64 = self.conn.query_row(
             "SELECT COUNT(DISTINCT d.task_id) FROM dependencies d 
              JOIN tasks t ON t.id = d.depends_on_task_id 
-             WHERE t.status = 'open'", [], |row| row.get(0)
+             WHERE t.status = 'open'",
+            [],
+            |row| row.get(0),
         )?;
 
         Ok(Summary {
@@ -1060,7 +1186,10 @@ impl Database {
         }
     }
 
-    pub fn get_linear_sync_by_issue(&self, linear_issue_id: &str) -> Result<Option<LinearSyncEntry>> {
+    pub fn get_linear_sync_by_issue(
+        &self,
+        linear_issue_id: &str,
+    ) -> Result<Option<LinearSyncEntry>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, local_task_id, linear_issue_id, linear_issue_identifier, last_synced_at, last_local_hash, last_remote_hash, sync_direction
              FROM linear_sync WHERE linear_issue_id = ?1"
@@ -1104,16 +1233,18 @@ impl Database {
     }
 
     pub fn count_linear_synced(&self) -> Result<i64> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM linear_sync", [], |row| row.get(0)
-        )?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM linear_sync", [], |row| row.get(0))?;
         Ok(count)
     }
 
     pub fn get_last_sync_time(&self) -> Result<Option<String>> {
-        let result: std::result::Result<String, rusqlite::Error> = self.conn.query_row(
-            "SELECT MAX(last_synced_at) FROM linear_sync", [], |row| row.get(0)
-        );
+        let result: std::result::Result<String, rusqlite::Error> =
+            self.conn
+                .query_row("SELECT MAX(last_synced_at) FROM linear_sync", [], |row| {
+                    row.get(0)
+                });
         match result {
             Ok(t) => Ok(Some(t)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1138,7 +1269,8 @@ impl Database {
                 priority: parse_priority(&row.get::<_, String>(4)?)?,
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
-                due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+                due_date: due_date
+                    .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
                 tags: row.get(8)?,
                 notes: row.get(9)?,
                 user_info: row.get(10)?,
@@ -1147,7 +1279,9 @@ impl Database {
                 updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
             })
         })?;
-        tasks.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        tasks
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     /// List tasks that have no epic assigned.
@@ -1166,7 +1300,8 @@ impl Database {
                 priority: parse_priority(&row.get::<_, String>(4)?)?,
                 epic_id: row.get(5)?,
                 assignee_id: row.get(6)?,
-                due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+                due_date: due_date
+                    .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
                 tags: row.get(8)?,
                 notes: row.get(9)?,
                 user_info: row.get(10)?,
@@ -1175,12 +1310,16 @@ impl Database {
                 updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
             })
         })?;
-        tasks.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+        tasks
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     /// Delete all tasks that have no epic assigned. Returns count deleted.
     pub fn delete_orphan_tasks(&mut self) -> Result<usize> {
-        let count = self.conn.execute("DELETE FROM tasks WHERE epic_id IS NULL", [])?;
+        let count = self
+            .conn
+            .execute("DELETE FROM tasks WHERE epic_id IS NULL", [])?;
         Ok(count)
     }
 
@@ -1193,16 +1332,17 @@ impl Database {
             (body, title, &now),
         )?;
         let id = self.conn.last_insert_rowid();
-        self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-            entity: "followup".to_string(),
-            id: id.to_string(),
-        })
+        self.get_followup(id)?
+            .ok_or_else(|| MyceliumError::NotFound {
+                entity: "followup".to_string(),
+                id: id.to_string(),
+            })
     }
 
     pub fn get_followup(&self, id: i64) -> Result<Option<Followup>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, body, title, status, closure_reason, created_at, closed_at
-             FROM followups WHERE id = ?1"
+             FROM followups WHERE id = ?1",
         )?;
 
         let row = stmt.query_row([id], |row| {
@@ -1213,7 +1353,9 @@ impl Database {
                 title: row.get(2)?,
                 status: row.get::<_, String>(3)?.parse().map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        0, rusqlite::types::Type::Text, Box::new(e),
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
                     )
                 })?,
                 closure_reason: row.get(4)?,
@@ -1270,7 +1412,9 @@ impl Database {
                 title: row.get(2)?,
                 status: row.get::<_, String>(3)?.parse().map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        0, rusqlite::types::Type::Text, Box::new(e),
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
                     )
                 })?,
                 closure_reason: row.get(4)?,
@@ -1280,9 +1424,11 @@ impl Database {
         };
 
         let rows = if let Some(s) = want_filter {
-            stmt.query_map([s], map_row)?.collect::<std::result::Result<Vec<_>, _>>()
+            stmt.query_map([s], map_row)?
+                .collect::<std::result::Result<Vec<_>, _>>()
         } else {
-            stmt.query_map([], map_row)?.collect::<std::result::Result<Vec<_>, _>>()
+            stmt.query_map([], map_row)?
+                .collect::<std::result::Result<Vec<_>, _>>()
         };
         rows.map_err(|e| e.into())
     }
@@ -1291,7 +1437,7 @@ impl Database {
     pub fn next_followup(&self) -> Result<Option<Followup>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, body, title, status, closure_reason, created_at, closed_at
-             FROM followups WHERE status IN ('open', 'in_progress') ORDER BY id LIMIT 1"
+             FROM followups WHERE status IN ('open', 'in_progress') ORDER BY id LIMIT 1",
         )?;
 
         let row = stmt.query_row([], |row| {
@@ -1302,7 +1448,9 @@ impl Database {
                 title: row.get(2)?,
                 status: row.get::<_, String>(3)?.parse().map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        0, rusqlite::types::Type::Text, Box::new(e),
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
                     )
                 })?,
                 closure_reason: row.get(4)?,
@@ -1324,10 +1472,12 @@ impl Database {
         new_status: FollowupStatus,
         closure_reason: Option<&str>,
     ) -> Result<Followup> {
-        let existing = self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-            entity: "followup".to_string(),
-            id: id.to_string(),
-        })?;
+        let existing = self
+            .get_followup(id)?
+            .ok_or_else(|| MyceliumError::NotFound {
+                entity: "followup".to_string(),
+                id: id.to_string(),
+            })?;
 
         let now = chrono::Local::now().to_rfc3339();
         let closed_at: Option<String> = if new_status.is_open() {
@@ -1346,13 +1496,19 @@ impl Database {
 
         self.conn.execute(
             "UPDATE followups SET status = ?1, closure_reason = ?2, closed_at = ?3 WHERE id = ?4",
-            (new_status.as_str(), reason.as_deref(), closed_at.as_deref(), id),
+            (
+                new_status.as_str(),
+                reason.as_deref(),
+                closed_at.as_deref(),
+                id,
+            ),
         )?;
 
-        self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-            entity: "followup".to_string(),
-            id: id.to_string(),
-        })
+        self.get_followup(id)?
+            .ok_or_else(|| MyceliumError::NotFound {
+                entity: "followup".to_string(),
+                id: id.to_string(),
+            })
     }
 
     pub fn update_followup_body(
@@ -1362,10 +1518,12 @@ impl Database {
         title: Option<&str>,
         clear_title: bool,
     ) -> Result<Followup> {
-        let existing = self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-            entity: "followup".to_string(),
-            id: id.to_string(),
-        })?;
+        let existing = self
+            .get_followup(id)?
+            .ok_or_else(|| MyceliumError::NotFound {
+                entity: "followup".to_string(),
+                id: id.to_string(),
+            })?;
 
         let new_body = body.unwrap_or(&existing.body);
         let new_title: Option<String> = if clear_title {
@@ -1381,14 +1539,17 @@ impl Database {
             (new_body, new_title.as_deref(), id),
         )?;
 
-        self.get_followup(id)?.ok_or_else(|| MyceliumError::NotFound {
-            entity: "followup".to_string(),
-            id: id.to_string(),
-        })
+        self.get_followup(id)?
+            .ok_or_else(|| MyceliumError::NotFound {
+                entity: "followup".to_string(),
+                id: id.to_string(),
+            })
     }
 
     pub fn delete_followup(&mut self, id: i64) -> Result<()> {
-        let count = self.conn.execute("DELETE FROM followups WHERE id = ?1", [id])?;
+        let count = self
+            .conn
+            .execute("DELETE FROM followups WHERE id = ?1", [id])?;
         if count == 0 {
             return Err(MyceliumError::NotFound {
                 entity: "followup".to_string(),
@@ -1400,9 +1561,9 @@ impl Database {
 
     /// Count rows grouped by status. Returns zero for absent buckets.
     pub fn count_followups(&self) -> Result<FollowupCounts> {
-        let mut stmt = self.conn.prepare(
-            "SELECT status, COUNT(*) FROM followups GROUP BY status"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT status, COUNT(*) FROM followups GROUP BY status")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -1459,4 +1620,3 @@ pub struct Summary {
     pub overdue_tasks: i64,
     pub blocked_tasks: i64,
 }
-

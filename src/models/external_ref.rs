@@ -13,7 +13,12 @@ pub struct ExternalRef {
 }
 
 impl ExternalRef {
-    pub fn new(id: i64, task_id: i64, ref_type: ExternalRefType, reference: impl Into<String>) -> Self {
+    pub fn new(
+        id: i64,
+        task_id: i64,
+        ref_type: ExternalRefType,
+        reference: impl Into<String>,
+    ) -> Self {
         Self {
             id,
             task_id,

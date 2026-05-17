@@ -1,9 +1,9 @@
-use colored::Colorize;
-use comfy_table::{Table, ContentArrangement};
-use crate::commands::{ensure_initialized, INFO_PREFIX};
 use crate::cli::OutputFormat;
-use crate::models::{Priority, Status};
+use crate::commands::{ensure_initialized, INFO_PREFIX};
 use crate::error::Result;
+use crate::models::{Priority, Status};
+use colored::Colorize;
+use comfy_table::{ContentArrangement, Table};
 
 pub fn execute(
     epic_id: Option<i64>,
@@ -18,5 +18,16 @@ pub fn execute(
     quiet: bool,
 ) -> Result<()> {
     // This is just a convenience wrapper around task list
-    super::task::list(epic_id, status, priority, assignee_id, blocked, overdue, tag, all, format, quiet)
+    super::task::list(
+        epic_id,
+        status,
+        priority,
+        assignee_id,
+        blocked,
+        overdue,
+        tag,
+        all,
+        format,
+        quiet,
+    )
 }

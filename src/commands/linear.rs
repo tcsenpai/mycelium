@@ -2,7 +2,9 @@ use colored::Colorize;
 use std::io::Write;
 
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX, WARNING_PREFIX};
+use crate::commands::{
+    ensure_initialized, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX,
+};
 use crate::error::Result;
 use crate::linear::client::LinearClient;
 use crate::linear::config::LinearConfig;
@@ -34,7 +36,9 @@ pub fn setup(quiet: bool) -> Result<()> {
     let api_key = api_key.trim().to_string();
 
     if api_key.is_empty() {
-        return Err(crate::error::MyceliumError::LinearConfig("API key cannot be empty".to_string()));
+        return Err(crate::error::MyceliumError::LinearConfig(
+            "API key cannot be empty".to_string(),
+        ));
     }
 
     // Step 2: Verify key and fetch teams
@@ -45,7 +49,9 @@ pub fn setup(quiet: bool) -> Result<()> {
     let teams = client.fetch_teams()?;
 
     if teams.is_empty() {
-        return Err(crate::error::MyceliumError::LinearConfig("No teams found for this API key".to_string()));
+        return Err(crate::error::MyceliumError::LinearConfig(
+            "No teams found for this API key".to_string(),
+        ));
     }
 
     // Step 3: Select team
@@ -90,10 +96,16 @@ pub fn setup(quiet: bool) -> Result<()> {
     // Auto-detect current values to show the user
     let detected_repo = crate::linear::config::LinearConfig::resolve_filter_labels(
         &crate::linear::config::LinearConfig {
-            api_key: String::new(), team_id: String::new(), team_name: String::new(),
-            sync_enabled: true, repo_label: "auto".to_string(), branch_label: "auto".to_string(),
-            extra_labels: vec![], default_assignee_id: None, mapping: Default::default(),
-        }
+            api_key: String::new(),
+            team_id: String::new(),
+            team_name: String::new(),
+            sync_enabled: true,
+            repo_label: "auto".to_string(),
+            branch_label: "auto".to_string(),
+            extra_labels: vec![],
+            default_assignee_id: None,
+            mapping: Default::default(),
+        },
     );
 
     if !quiet {
@@ -112,7 +124,11 @@ pub fn setup(quiet: bool) -> Result<()> {
     let mut repo_input = String::new();
     std::io::stdin().read_line(&mut repo_input).ok();
     let repo_label = repo_input.trim().to_string();
-    let repo_label = if repo_label.is_empty() { "auto".to_string() } else { repo_label };
+    let repo_label = if repo_label.is_empty() {
+        "auto".to_string()
+    } else {
+        repo_label
+    };
 
     if !quiet {
         println!("\n  Branch label source:");
@@ -125,7 +141,11 @@ pub fn setup(quiet: bool) -> Result<()> {
     let mut branch_input = String::new();
     std::io::stdin().read_line(&mut branch_input).ok();
     let branch_label = branch_input.trim().to_string();
-    let branch_label = if branch_label.is_empty() { "auto".to_string() } else { branch_label };
+    let branch_label = if branch_label.is_empty() {
+        "auto".to_string()
+    } else {
+        branch_label
+    };
 
     // Extra static labels
     let mut extra_labels: Vec<String> = Vec::new();
@@ -179,7 +199,8 @@ pub fn setup(quiet: bool) -> Result<()> {
                 rest.split('/').next().map(|s| s.to_string())
             // https://github.com/user/repo.git
             } else if url.contains("github.com/") {
-                url.split("github.com/").nth(1)
+                url.split("github.com/")
+                    .nth(1)
                     .and_then(|s| s.split('/').next())
                     .map(|s| s.to_string())
             } else {
@@ -199,25 +220,45 @@ pub fn setup(quiet: bool) -> Result<()> {
         // Try matching: email > name > display_name > git username (case-insensitive, substring)
         let matched_member = None
             // Exact email match
-            .or_else(|| git_email.as_ref().and_then(|email|
-                members.iter().find(|m| m.email.eq_ignore_ascii_case(email))))
+            .or_else(|| {
+                git_email
+                    .as_ref()
+                    .and_then(|email| members.iter().find(|m| m.email.eq_ignore_ascii_case(email)))
+            })
             // Exact name match
-            .or_else(|| git_name.as_ref().and_then(|name|
-                members.iter().find(|m|
-                    m.name.eq_ignore_ascii_case(name) || m.display_name.eq_ignore_ascii_case(name))))
+            .or_else(|| {
+                git_name.as_ref().and_then(|name| {
+                    members.iter().find(|m| {
+                        m.name.eq_ignore_ascii_case(name)
+                            || m.display_name.eq_ignore_ascii_case(name)
+                    })
+                })
+            })
             // Git username match against name/displayName
-            .or_else(|| git_username.as_ref().and_then(|username|
-                members.iter().find(|m|
-                    m.name.eq_ignore_ascii_case(username)
-                    || m.display_name.eq_ignore_ascii_case(username)
-                    || m.email.split('@').next().map_or(false, |local| local.eq_ignore_ascii_case(username)))))
+            .or_else(|| {
+                git_username.as_ref().and_then(|username| {
+                    members.iter().find(|m| {
+                        m.name.eq_ignore_ascii_case(username)
+                            || m.display_name.eq_ignore_ascii_case(username)
+                            || m.email
+                                .split('@')
+                                .next()
+                                .map_or(false, |local| local.eq_ignore_ascii_case(username))
+                    })
+                })
+            })
             // Substring: git name contained in Linear name or vice versa
-            .or_else(|| git_name.as_ref().and_then(|name| {
-                let lower = name.to_lowercase();
-                members.iter().find(|m|
-                    m.name.to_lowercase().contains(&lower) || lower.contains(&m.name.to_lowercase())
-                    || m.display_name.to_lowercase().contains(&lower) || lower.contains(&m.display_name.to_lowercase()))
-            }));
+            .or_else(|| {
+                git_name.as_ref().and_then(|name| {
+                    let lower = name.to_lowercase();
+                    members.iter().find(|m| {
+                        m.name.to_lowercase().contains(&lower)
+                            || lower.contains(&m.name.to_lowercase())
+                            || m.display_name.to_lowercase().contains(&lower)
+                            || lower.contains(&m.display_name.to_lowercase())
+                    })
+                })
+            });
 
         if let Some(member) = matched_member {
             default_assignee_id = Some(member.id.clone());
@@ -231,7 +272,12 @@ pub fn setup(quiet: bool) -> Result<()> {
                 assignee_map.insert(username.clone(), member.id.clone());
             }
             if !quiet {
-                println!("\n  {} Matched you to: {} ({})", SUCCESS_PREFIX, member.name.green(), member.email);
+                println!(
+                    "\n  {} Matched you to: {} ({})",
+                    SUCCESS_PREFIX,
+                    member.name.green(),
+                    member.email
+                );
             }
         } else {
             // No auto-match — ask user to pick
@@ -251,7 +297,11 @@ pub fn setup(quiet: bool) -> Result<()> {
                     if let Some(ref name) = git_name {
                         assignee_map.insert(name.clone(), member.id.clone());
                     }
-                    println!("  {} Set default assignee to: {}", SUCCESS_PREFIX, member.name.green());
+                    println!(
+                        "  {} Set default assignee to: {}",
+                        SUCCESS_PREFIX,
+                        member.name.green()
+                    );
                 }
             }
         }
@@ -261,7 +311,9 @@ pub fn setup(quiet: bool) -> Result<()> {
             if let Ok(assignees) = db.list_assignees() {
                 for assignee in &assignees {
                     if let Some(ref email) = assignee.email {
-                        if let Some(member) = members.iter().find(|m| m.email.eq_ignore_ascii_case(email)) {
+                        if let Some(member) =
+                            members.iter().find(|m| m.email.eq_ignore_ascii_case(email))
+                        {
                             if !assignee_map.values().any(|v| v == &member.id) {
                                 assignee_map.insert(email.clone(), member.id.clone());
                             }
@@ -269,7 +321,8 @@ pub fn setup(quiet: bool) -> Result<()> {
                     }
                     if let Some(ref github) = assignee.github_username {
                         if let Some(member) = members.iter().find(|m| {
-                            m.display_name.eq_ignore_ascii_case(github) || m.name.eq_ignore_ascii_case(github)
+                            m.display_name.eq_ignore_ascii_case(github)
+                                || m.name.eq_ignore_ascii_case(github)
                         }) {
                             if !assignee_map.values().any(|v| v == &member.id) {
                                 assignee_map.insert(github.clone(), member.id.clone());
@@ -300,8 +353,15 @@ pub fn setup(quiet: bool) -> Result<()> {
     config.save()?;
 
     if !quiet {
-        println!("\n{} Linear integration configured for team '{}'", SUCCESS_PREFIX, team_name.green());
-        println!("  Config saved to: {}", LinearConfig::config_path().display());
+        println!(
+            "\n{} Linear integration configured for team '{}'",
+            SUCCESS_PREFIX,
+            team_name.green()
+        );
+        println!(
+            "  Config saved to: {}",
+            LinearConfig::config_path().display()
+        );
         println!("  Run `myc linear sync` to start syncing.");
     }
 
@@ -315,7 +375,10 @@ pub fn sync_cmd(force_local: bool, force_remote: bool, quiet: bool) -> Result<()
 
     let resolution = if force_local && force_remote {
         if !quiet {
-            println!("{} Cannot use both --force-local and --force-remote. Defaulting to remote wins.", WARNING_PREFIX);
+            println!(
+                "{} Cannot use both --force-local and --force-remote. Defaulting to remote wins.",
+                WARNING_PREFIX
+            );
         }
         ConflictResolution::RemoteWins
     } else if force_local {
@@ -327,7 +390,10 @@ pub fn sync_cmd(force_local: bool, force_remote: bool, quiet: bool) -> Result<()
     };
 
     if !quiet {
-        println!("{} Syncing with Linear (team: {})...", INFO_PREFIX, config.team_name);
+        println!(
+            "{} Syncing with Linear (team: {})...",
+            INFO_PREFIX, config.team_name
+        );
     }
 
     let stats = sync::sync(&mut db, &client, &config, resolution, quiet)?;
@@ -341,7 +407,10 @@ pub fn push_cmd(quiet: bool) -> Result<()> {
     let client = LinearClient::new(&config.api_key);
 
     if !quiet {
-        println!("{} Pushing to Linear (team: {})...", INFO_PREFIX, config.team_name);
+        println!(
+            "{} Pushing to Linear (team: {})...",
+            INFO_PREFIX, config.team_name
+        );
     }
 
     let stats = sync::push(&mut db, &client, &config, quiet)?;
@@ -355,7 +424,10 @@ pub fn pull_cmd(quiet: bool) -> Result<()> {
     let client = LinearClient::new(&config.api_key);
 
     if !quiet {
-        println!("{} Pulling from Linear (team: {})...", INFO_PREFIX, config.team_name);
+        println!(
+            "{} Pulling from Linear (team: {})...",
+            INFO_PREFIX, config.team_name
+        );
     }
 
     let stats = sync::pull(&mut db, &client, &config, quiet)?;
@@ -366,7 +438,10 @@ pub fn pull_cmd(quiet: bool) -> Result<()> {
 pub fn status_cmd(format: &OutputFormat, quiet: bool) -> Result<()> {
     if !LinearConfig::exists() {
         if !quiet {
-            println!("{} Linear is not configured. Run `myc linear setup`.", INFO_PREFIX);
+            println!(
+                "{} Linear is not configured. Run `myc linear setup`.",
+                INFO_PREFIX
+            );
         }
         return Ok(());
     }
@@ -400,11 +475,30 @@ pub fn status_cmd(format: &OutputFormat, quiet: bool) -> Result<()> {
         OutputFormat::Table => {
             if !quiet {
                 println!("{} Linear Integration Status", INFO_PREFIX);
-                println!("  Team:              {} ({})", config.team_name.green(), config.team_id);
-                println!("  Sync enabled:      {}", if config.sync_enabled { "yes".green() } else { "no".red() });
+                println!(
+                    "  Team:              {} ({})",
+                    config.team_name.green(),
+                    config.team_id
+                );
+                println!(
+                    "  Sync enabled:      {}",
+                    if config.sync_enabled {
+                        "yes".green()
+                    } else {
+                        "no".red()
+                    }
+                );
                 println!("  Epic mapping:      {}", config.mapping.epic_mode);
-                println!("  Repo label:        {} ({})", config.repo_label, resolved_labels.first().unwrap_or(&"none".to_string()));
-                println!("  Branch label:      {} ({})", config.branch_label, resolved_labels.get(1).unwrap_or(&"none".to_string()));
+                println!(
+                    "  Repo label:        {} ({})",
+                    config.repo_label,
+                    resolved_labels.first().unwrap_or(&"none".to_string())
+                );
+                println!(
+                    "  Branch label:      {} ({})",
+                    config.branch_label,
+                    resolved_labels.get(1).unwrap_or(&"none".to_string())
+                );
                 if !resolved_labels.is_empty() {
                     println!("  Active filter:     {:?}", resolved_labels);
                 }
@@ -430,7 +524,10 @@ pub fn unlink_cmd(quiet: bool) -> Result<()> {
     }
 
     if !quiet {
-        print!("{} Remove Linear configuration and sync data? [y/N] ", WARNING_PREFIX);
+        print!(
+            "{} Remove Linear configuration and sync data? [y/N] ",
+            WARNING_PREFIX
+        );
         std::io::stdout().flush().ok();
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).ok();
@@ -461,19 +558,34 @@ fn print_stats(stats: &sync::SyncStats, quiet: bool) {
 
     println!("\n  Sync complete:");
     if stats.pushed_new > 0 {
-        println!("    Pushed new:     {}", stats.pushed_new.to_string().green());
+        println!(
+            "    Pushed new:     {}",
+            stats.pushed_new.to_string().green()
+        );
     }
     if stats.pushed_updated > 0 {
-        println!("    Pushed updated: {}", stats.pushed_updated.to_string().blue());
+        println!(
+            "    Pushed updated: {}",
+            stats.pushed_updated.to_string().blue()
+        );
     }
     if stats.pulled_new > 0 {
-        println!("    Pulled new:     {}", stats.pulled_new.to_string().green());
+        println!(
+            "    Pulled new:     {}",
+            stats.pulled_new.to_string().green()
+        );
     }
     if stats.pulled_updated > 0 {
-        println!("    Pulled updated: {}", stats.pulled_updated.to_string().cyan());
+        println!(
+            "    Pulled updated: {}",
+            stats.pulled_updated.to_string().cyan()
+        );
     }
     if stats.conflicts > 0 {
-        println!("    Conflicts:      {}", stats.conflicts.to_string().yellow());
+        println!(
+            "    Conflicts:      {}",
+            stats.conflicts.to_string().yellow()
+        );
     }
     if !stats.errors.is_empty() {
         println!("    Errors:");

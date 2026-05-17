@@ -1,5 +1,5 @@
-use std::process::Command;
 use std::path::PathBuf;
+use std::process::Command;
 use tempfile::TempDir;
 
 fn myc_path() -> PathBuf {
@@ -38,7 +38,10 @@ fn print_output(output: &std::process::Output) {
 #[test]
 fn test_init() {
     let temp = TempDir::new().unwrap();
-    let output = myc_cmd(&temp).arg("init").output().expect("Failed to execute");
+    let output = myc_cmd(&temp)
+        .arg("init")
+        .output()
+        .expect("Failed to execute");
     print_output(&output);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -49,7 +52,7 @@ fn test_init() {
 fn test_epic_create() {
     let temp = TempDir::new().unwrap();
     myc_cmd(&temp).arg("init").output().expect("Failed to init");
-    
+
     let output = myc_cmd(&temp)
         .arg("epic")
         .arg("create")
@@ -57,7 +60,7 @@ fn test_epic_create() {
         .arg("Test Epic")
         .output()
         .expect("Failed to create epic");
-    
+
     print_output(&output);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -68,8 +71,14 @@ fn test_epic_create() {
 fn test_task_create() {
     let temp = TempDir::new().unwrap();
     myc_cmd(&temp).arg("init").output().expect("Failed to init");
-    myc_cmd(&temp).arg("epic").arg("create").arg("--title").arg("Test Epic").output().expect("Failed to create epic");
-    
+    myc_cmd(&temp)
+        .arg("epic")
+        .arg("create")
+        .arg("--title")
+        .arg("Test Epic")
+        .output()
+        .expect("Failed to create epic");
+
     let output = myc_cmd(&temp)
         .arg("task")
         .arg("create")
@@ -79,7 +88,7 @@ fn test_task_create() {
         .arg("1")
         .output()
         .expect("Failed to create task");
-    
+
     print_output(&output);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -90,10 +99,28 @@ fn test_task_create() {
 fn test_dependency_blocking() {
     let temp = TempDir::new().unwrap();
     myc_cmd(&temp).arg("init").output().expect("Failed to init");
-    myc_cmd(&temp).arg("epic").arg("create").arg("--title").arg("Test Epic").output().expect("Failed to create epic");
-    myc_cmd(&temp).arg("task").arg("create").arg("--title").arg("Task 1").output().expect("Failed to create task 1");
-    myc_cmd(&temp).arg("task").arg("create").arg("--title").arg("Task 2").output().expect("Failed to create task 2");
-    
+    myc_cmd(&temp)
+        .arg("epic")
+        .arg("create")
+        .arg("--title")
+        .arg("Test Epic")
+        .output()
+        .expect("Failed to create epic");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg("Task 1")
+        .output()
+        .expect("Failed to create task 1");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg("Task 2")
+        .output()
+        .expect("Failed to create task 2");
+
     // Make task 1 block task 2
     let output = myc_cmd(&temp)
         .arg("task")
@@ -104,10 +131,10 @@ fn test_dependency_blocking() {
         .arg("2")
         .output()
         .expect("Failed to link");
-    
+
     print_output(&output);
     assert!(output.status.success());
-    
+
     // Try to close task 2 (should fail since it's blocked)
     let output = myc_cmd(&temp)
         .arg("task")
@@ -115,19 +142,29 @@ fn test_dependency_blocking() {
         .arg("2")
         .output()
         .expect("Failed to close");
-    
+
     print_output(&output);
     // Note: blocked message goes to stdout since it's not a hard error
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("blocked by"));
-    
+
     // Close task 1 first
-    let output = myc_cmd(&temp).arg("task").arg("close").arg("1").output().expect("Failed to close 1");
+    let output = myc_cmd(&temp)
+        .arg("task")
+        .arg("close")
+        .arg("1")
+        .output()
+        .expect("Failed to close 1");
     print_output(&output);
     assert!(output.status.success());
-    
+
     // Now task 2 should close
-    let output = myc_cmd(&temp).arg("task").arg("close").arg("2").output().expect("Failed to close 2");
+    let output = myc_cmd(&temp)
+        .arg("task")
+        .arg("close")
+        .arg("2")
+        .output()
+        .expect("Failed to close 2");
     print_output(&output);
     assert!(output.status.success());
 }
@@ -136,7 +173,7 @@ fn test_dependency_blocking() {
 fn test_assignee() {
     let temp = TempDir::new().unwrap();
     myc_cmd(&temp).arg("init").output().expect("Failed to init");
-    
+
     // Create assignee
     let output = myc_cmd(&temp)
         .arg("assignee")
@@ -147,13 +184,19 @@ fn test_assignee() {
         .arg("johndoe")
         .output()
         .expect("Failed to create assignee");
-    
+
     print_output(&output);
     assert!(output.status.success());
-    
+
     // Create task and assign
-    myc_cmd(&temp).arg("task").arg("create").arg("--title").arg("Test").output().expect("Failed to create task");
-    
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg("Test")
+        .output()
+        .expect("Failed to create task");
+
     let output = myc_cmd(&temp)
         .arg("task")
         .arg("assign")
@@ -161,7 +204,7 @@ fn test_assignee() {
         .arg("1")
         .output()
         .expect("Failed to assign");
-    
+
     print_output(&output);
     assert!(output.status.success());
 }
@@ -170,8 +213,14 @@ fn test_assignee() {
 fn test_json_output() {
     let temp = TempDir::new().unwrap();
     myc_cmd(&temp).arg("init").output().expect("Failed to init");
-    myc_cmd(&temp).arg("epic").arg("create").arg("--title").arg("Test Epic").output().expect("Failed to create epic");
-    
+    myc_cmd(&temp)
+        .arg("epic")
+        .arg("create")
+        .arg("--title")
+        .arg("Test Epic")
+        .output()
+        .expect("Failed to create epic");
+
     let output = myc_cmd(&temp)
         .arg("epic")
         .arg("list")
@@ -179,7 +228,7 @@ fn test_json_output() {
         .arg("json")
         .output()
         .expect("Failed to list");
-    
+
     print_output(&output);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -190,15 +239,27 @@ fn test_json_output() {
 fn test_export() {
     let temp = TempDir::new().unwrap();
     myc_cmd(&temp).arg("init").output().expect("Failed to init");
-    myc_cmd(&temp).arg("epic").arg("create").arg("--title").arg("Test Epic").output().expect("Failed to create epic");
-    myc_cmd(&temp).arg("task").arg("create").arg("--title").arg("Test Task").output().expect("Failed to create task");
-    
+    myc_cmd(&temp)
+        .arg("epic")
+        .arg("create")
+        .arg("--title")
+        .arg("Test Epic")
+        .output()
+        .expect("Failed to create epic");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg("Test Task")
+        .output()
+        .expect("Failed to create task");
+
     let output = myc_cmd(&temp)
         .arg("export")
         .arg("json")
         .output()
         .expect("Failed to export");
-    
+
     print_output(&output);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -226,8 +287,20 @@ fn test_task_create_help_does_not_panic() {
 fn test_blocked_list_only_shows_tasks_with_open_blockers() {
     let temp = TempDir::new().unwrap();
     myc_cmd(&temp).arg("init").output().expect("Failed to init");
-    myc_cmd(&temp).arg("task").arg("create").arg("--title").arg("Blocker").output().expect("Failed to create blocker");
-    myc_cmd(&temp).arg("task").arg("create").arg("--title").arg("Blocked").output().expect("Failed to create blocked task");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg("Blocker")
+        .output()
+        .expect("Failed to create blocker");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg("Blocked")
+        .output()
+        .expect("Failed to create blocked task");
     myc_cmd(&temp)
         .arg("task")
         .arg("link")
@@ -251,7 +324,12 @@ fn test_blocked_list_only_shows_tasks_with_open_blockers() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"id\": 2"));
 
-    myc_cmd(&temp).arg("task").arg("close").arg("1").output().expect("Failed to close blocker");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("close")
+        .arg("1")
+        .output()
+        .expect("Failed to close blocker");
 
     let output = myc_cmd(&temp)
         .arg("task")
@@ -271,7 +349,13 @@ fn test_blocked_list_only_shows_tasks_with_open_blockers() {
 fn test_delete_epic_detaches_tasks_instead_of_deleting_them() {
     let temp = TempDir::new().unwrap();
     myc_cmd(&temp).arg("init").output().expect("Failed to init");
-    myc_cmd(&temp).arg("epic").arg("create").arg("--title").arg("Epic").output().expect("Failed to create epic");
+    myc_cmd(&temp)
+        .arg("epic")
+        .arg("create")
+        .arg("--title")
+        .arg("Epic")
+        .output()
+        .expect("Failed to create epic");
     myc_cmd(&temp)
         .arg("task")
         .arg("create")
@@ -315,20 +399,23 @@ fn test_followup_full_lifecycle() {
     // add (with title)
     let out = myc_cmd(&temp)
         .args(["followup", "add", "first body text", "--title", "first"])
-        .output().expect("add");
+        .output()
+        .expect("add");
     print_output(&out);
     assert!(out.status.success());
 
     // add (no title, alias `fu`)
     let out = myc_cmd(&temp)
         .args(["fu", "add", "second body, no title"])
-        .output().expect("add 2");
+        .output()
+        .expect("add 2");
     assert!(out.status.success());
 
     // list — default -a shows all (both visible)
     let out = myc_cmd(&temp)
         .args(["followup", "list", "--format", "json"])
-        .output().expect("list");
+        .output()
+        .expect("list");
     let json = String::from_utf8_lossy(&out.stdout);
     assert!(json.contains("\"id\": 1"));
     assert!(json.contains("\"id\": 2"));
@@ -336,7 +423,8 @@ fn test_followup_full_lifecycle() {
     // -o shows only active items (both open at this point)
     let out = myc_cmd(&temp)
         .args(["followup", "list", "-o", "--format", "json"])
-        .output().expect("list -o");
+        .output()
+        .expect("list -o");
     let json = String::from_utf8_lossy(&out.stdout);
     assert!(json.contains("\"id\": 1"));
     assert!(json.contains("\"id\": 2"));
@@ -344,7 +432,8 @@ fn test_followup_full_lifecycle() {
     // -c shows only closed items (none yet)
     let out = myc_cmd(&temp)
         .args(["followup", "list", "-c", "--format", "json"])
-        .output().expect("list -c");
+        .output()
+        .expect("list -c");
     let json = String::from_utf8_lossy(&out.stdout);
     assert!(!json.contains("\"id\": 1"));
     assert!(!json.contains("\"id\": 2"));
@@ -352,52 +441,63 @@ fn test_followup_full_lifecycle() {
     // count
     let out = myc_cmd(&temp)
         .args(["followup", "count", "--format", "json"])
-        .output().expect("count");
+        .output()
+        .expect("count");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(body.contains("\"open\": 2"));
 
     // append
     let out = myc_cmd(&temp)
         .args(["followup", "append", "1", "extra context"])
-        .output().expect("append");
+        .output()
+        .expect("append");
     assert!(out.status.success());
     let out = myc_cmd(&temp)
         .args(["followup", "show", "1", "--format", "json"])
-        .output().expect("show");
+        .output()
+        .expect("show");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(body.contains("extra context"));
 
     // edit replace
     let out = myc_cmd(&temp)
         .args(["followup", "edit", "1", "--body", "fully replaced"])
-        .output().expect("edit");
+        .output()
+        .expect("edit");
     assert!(out.status.success());
 
     // start + done
-    let out = myc_cmd(&temp).args(["followup", "start", "1"]).output().expect("start");
+    let out = myc_cmd(&temp)
+        .args(["followup", "start", "1"])
+        .output()
+        .expect("start");
     assert!(out.status.success());
     let out = myc_cmd(&temp)
         .args(["followup", "done", "1", "--reason", "tested"])
-        .output().expect("done");
+        .output()
+        .expect("done");
     assert!(out.status.success());
 
     // next should now return #2 (only remaining open)
     let out = myc_cmd(&temp)
         .args(["followup", "next", "--format", "json"])
-        .output().expect("next");
+        .output()
+        .expect("next");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(body.contains("\"id\": 2"));
 
     // -c now shows #1 (done), -o shows #2 (open)
     let out = myc_cmd(&temp)
         .args(["followup", "list", "-c", "--format", "json"])
-        .output().expect("list -c");
+        .output()
+        .expect("list -c");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(body.contains("\"id\": 1"));
     assert!(!body.contains("\"id\": 2"));
     let out = myc_cmd(&temp)
         .args(["followup", "list", "-o", "--format", "json"])
-        .output().expect("list -o");
+        .output()
+        .expect("list -o");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(!body.contains("\"id\": 1"));
     assert!(body.contains("\"id\": 2"));
@@ -405,24 +505,30 @@ fn test_followup_full_lifecycle() {
     // wontfix #2
     let out = myc_cmd(&temp)
         .args(["followup", "wontfix", "2", "--reason", "scope creep"])
-        .output().expect("wontfix");
+        .output()
+        .expect("wontfix");
     assert!(out.status.success());
 
     // next should be null now
     let out = myc_cmd(&temp)
         .args(["followup", "next", "--format", "json"])
-        .output().expect("next empty");
+        .output()
+        .expect("next empty");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(body.trim().starts_with("null"));
 
     // reopen #2
-    let out = myc_cmd(&temp).args(["followup", "reopen", "2"]).output().expect("reopen");
+    let out = myc_cmd(&temp)
+        .args(["followup", "reopen", "2"])
+        .output()
+        .expect("reopen");
     assert!(out.status.success());
 
     // rm with --force
     let out = myc_cmd(&temp)
         .args(["followup", "rm", "2", "--force"])
-        .output().expect("rm");
+        .output()
+        .expect("rm");
     assert!(out.status.success());
 }
 
@@ -432,19 +538,28 @@ fn test_followup_promote_to_task() {
     let _ = myc_cmd(&temp).arg("init").output().expect("init");
 
     let _ = myc_cmd(&temp)
-        .args(["followup", "add", "should become a real task", "--title", "Real work"])
-        .output().expect("add");
+        .args([
+            "followup",
+            "add",
+            "should become a real task",
+            "--title",
+            "Real work",
+        ])
+        .output()
+        .expect("add");
 
     let out = myc_cmd(&temp)
         .args(["followup", "promote", "1", "--priority", "high"])
-        .output().expect("promote");
+        .output()
+        .expect("promote");
     print_output(&out);
     assert!(out.status.success());
 
     // Followup should now be done
     let out = myc_cmd(&temp)
         .args(["followup", "show", "1", "--format", "json"])
-        .output().expect("show fu");
+        .output()
+        .expect("show fu");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(body.contains("\"status\": \"done\""));
     assert!(body.contains("Promoted to task #1"));
@@ -452,7 +567,8 @@ fn test_followup_promote_to_task() {
     // Task should exist with the title
     let out = myc_cmd(&temp)
         .args(["task", "show", "1", "--format", "json"])
-        .output().expect("show task");
+        .output()
+        .expect("show task");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(body.contains("\"title\": \"Real work\""));
     assert!(body.contains("\"priority\": \"high\""));
@@ -464,14 +580,17 @@ fn test_followup_close_hint_fires() {
     let _ = myc_cmd(&temp).arg("init").output().expect("init");
     let _ = myc_cmd(&temp)
         .args(["task", "create", "--title", "Some task"])
-        .output().expect("task create");
+        .output()
+        .expect("task create");
     let _ = myc_cmd(&temp)
         .args(["followup", "add", "something to look at later"])
-        .output().expect("fu add");
+        .output()
+        .expect("fu add");
 
     let out = myc_cmd(&temp)
         .args(["task", "close", "1"])
-        .output().expect("task close");
+        .output()
+        .expect("task close");
     print_output(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("open follow-up"));
