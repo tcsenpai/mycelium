@@ -194,11 +194,38 @@ Mycelium's state must remain predictable and auditable at all times.
 > The state of Mycelium after any operation must be explainable to another agent with zero context.
 "#;
 
+/// Ensure `.mycelium/` exists with gitignore and an initialized DB.
+/// Returns true if the project was just created, false if it already existed.
+fn ensure_project_initialized(mycelium_dir: &Path) -> Result<bool> {
+    if mycelium_dir.exists() {
+        return Ok(false);
+    }
+
+    fs::create_dir_all(mycelium_dir)?;
+
+    let gitignore_content = r#"# Mycelium database
+# The database file is git-trackable but WAL files are not
+*.db-wal
+*.db-shm
+# Temporary files
+*.tmp
+"#;
+    fs::write(mycelium_dir.join(".gitignore"), gitignore_content)?;
+
+    let db_path = mycelium_dir.join("mycelium.db");
+    Database::open(&db_path)?;
+
+    println!("{} Mycelium project initialized", SUCCESS_PREFIX.green());
+    println!("  Database: {}", db_path.display());
+    println!("  Git tracking: Add {} to your repo", ".mycelium/".cyan());
+
+    Ok(true)
+}
+
 pub fn execute(force_init: bool) -> Result<()> {
     let cwd = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mycelium_dir = cwd.join(".mycelium");
-    let db_path = mycelium_dir.join("mycelium.db");
     let agents_md_path = cwd.join("AGENTS.md");
 
     if mycelium_dir.exists() && !force_init {
@@ -206,27 +233,7 @@ pub fn execute(force_init: bool) -> Result<()> {
         return Ok(());
     }
 
-    if !mycelium_dir.exists() {
-        // Create directory
-        fs::create_dir_all(&mycelium_dir)?;
-
-        // Create .gitignore
-        let gitignore_content = r#"# Mycelium database
-# The database file is git-trackable but WAL files are not
-*.db-wal
-*.db-shm
-# Temporary files
-*.tmp
-"#;
-        fs::write(mycelium_dir.join(".gitignore"), gitignore_content)?;
-
-        // Initialize database
-        Database::open(&db_path)?;
-
-        println!("{} Mycelium project initialized", SUCCESS_PREFIX.green());
-        println!("  Database: {}", db_path.display());
-        println!("  Git tracking: Add {} to your repo", ".mycelium/".cyan());
-    }
+    ensure_project_initialized(&mycelium_dir)?;
 
     // Create AGENTS.md if it doesn't exist
     if !agents_md_path.exists() {
@@ -254,7 +261,10 @@ pub fn execute(force_init: bool) -> Result<()> {
 pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
     let cwd = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let mycelium_dir = cwd.join(".mycelium");
     let agents_md_path = path.map(|p| cwd.join(p)).unwrap_or_else(|| cwd.join("AGENTS.md"));
+
+    ensure_project_initialized(&mycelium_dir)?;
 
     if !agents_md_path.exists() {
         fs::write(&agents_md_path, format!("# Agent Instructions\n{}", marker_block()))?;
