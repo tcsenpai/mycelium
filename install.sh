@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Requesting superuser access for installing:"
+sudo -v
+
 # Mycelium installer — builds and installs myc (CLI) and/or MycUI (GUI)
 
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
