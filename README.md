@@ -2,6 +2,9 @@
 
 A robust, production-grade task/plan manager CLI designed for reliability, agent usage, and git-trackable project management.
 
+[![crates.io](https://img.shields.io/crates/v/mycelium-manager.svg)](https://crates.io/crates/mycelium-manager)
+[![docs.rs](https://img.shields.io/docsrs/mycelium-manager)](https://docs.rs/mycelium-manager)
+[![Downloads](https://img.shields.io/crates/d/mycelium-manager.svg)](https://crates.io/crates/mycelium-manager)
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
@@ -22,6 +25,14 @@ A robust, production-grade task/plan manager CLI designed for reliability, agent
 - **📌 Follow-ups**: Lightweight "oh-by-the-way" scratch table for non-blocking items captured mid-work
 
 ## Installation
+
+### CLI (`myc`) — From crates.io (Recommended)
+
+```bash
+cargo install mycelium-manager
+```
+
+Installs the `myc` binary to `~/.cargo/bin/`. Requires Rust 1.75+.
 
 ### CLI (`myc`) — From Source
 
