@@ -25,3 +25,12 @@ Thumbs.db
 .mcp_data/
 .bank
 /ADDITIONAL.md
+
+# Dev artifacts (not for crate publish)
+PROJECT_INDEX.json
+PROJECT_INDEX.md
+PUBLISHING.md
+publish.sh
+
+# Local runtime DB (created by `myc init` in user projects, not crate root)
+/.mycelium/

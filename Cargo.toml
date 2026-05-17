@@ -1,14 +1,33 @@
 [package]
-name = "mycelium"
+name = "mycelium-manager"
 version = "0.1.0"
 edition = "2021"
 authors = ["Mycelium Contributors"]
-description = "A robust, production-grade task/plan manager CLI"
+description = "A robust, production-grade task/plan manager CLI (binary: myc)"
 license = "MIT"
+readme = "README.md"
 repository = "https://github.com/tcsenpai/mycelium"
-keywords = ["cli", "task-manager", "project-management", "productivity"]
+homepage = "https://github.com/tcsenpai/mycelium"
+documentation = "https://docs.rs/mycelium-manager"
+keywords = ["cli", "task-manager", "project-management", "productivity", "agent"]
 categories = ["command-line-utilities", "development-tools"]
 rust-version = "1.75"
+exclude = [
+    ".mycelium/*",
+    ".planning/*",
+    ".serena/*",
+    ".claude/*",
+    ".mcp_data/*",
+    ".bank",
+    "mycui/*",
+    "tests/fixtures/*",
+    "PROJECT_INDEX.*",
+    "ADDITIONAL.md",
+    "PUBLISHING.md",
+    "publish.sh",
+    "AGENTS.md",
+    "install.sh",
+]
 
 [[bin]]
 name = "myc"

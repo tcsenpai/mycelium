@@ -1011,7 +1011,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mycelium"
+name = "mycelium-manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
