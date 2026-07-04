@@ -322,6 +322,22 @@ myc task list --blocked
 myc export json
 ```
 
+### Claude Code follow-up hook (optional)
+
+`hooks/` ships a [Claude Code](https://docs.claude.com/en/docs/claude-code)
+Stop hook that enforces the end-of-task follow-up check, so it no longer
+relies on the agent remembering the AGENTS.md rule.
+
+```bash
+./hooks/install-hook.sh              # install into ~/.claude/
+./hooks/install-hook.sh --uninstall  # remove it
+```
+
+The hook self-gates: it stays silent outside mycelium projects (detected
+via the `myc:agents-start` marker in `AGENTS.md`) and only fires when
+active follow-ups exist, feeding them back to the agent to surface to
+you. Requires `jq`.
+
 ## Configuration
 
 No configuration needed! All data is stored in the project-local `.mycelium/` directory.
