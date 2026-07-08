@@ -7,6 +7,7 @@ use std::str::FromStr;
 #[serde(rename_all = "lowercase")]
 pub enum FollowupStatus {
     Open,
+    #[serde(rename = "in_progress")]
     InProgress,
     Done,
     Wontfix,

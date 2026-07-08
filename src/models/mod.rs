@@ -79,6 +79,7 @@ impl Priority {
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Open,
+    #[serde(rename = "in_progress")]
     InProgress,
     Closed,
 }
@@ -174,5 +175,34 @@ impl ExternalRefType {
             ExternalRefType::GitHubPr => "🔀",
             ExternalRefType::Url => "🔗",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression guard: the JSON enum string must match Display / FromStr / DB
+    // ("in_progress", not "inprogress"). rename_all="lowercase" would break this.
+    #[test]
+    fn status_in_progress_json_uses_underscore() {
+        assert_eq!(
+            serde_json::to_string(&Status::InProgress).unwrap(),
+            "\"in_progress\"",
+        );
+        assert_eq!(Status::InProgress.to_string(), "in_progress");
+        assert_eq!(
+            serde_json::from_str::<Status>("\"in_progress\"").unwrap(),
+            Status::InProgress,
+        );
+    }
+
+    #[test]
+    fn followup_status_in_progress_json_uses_underscore() {
+        assert_eq!(
+            serde_json::to_string(&FollowupStatus::InProgress).unwrap(),
+            "\"in_progress\"",
+        );
+        assert_eq!(FollowupStatus::InProgress.to_string(), "in_progress");
     }
 }

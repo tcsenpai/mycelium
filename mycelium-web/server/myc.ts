@@ -48,9 +48,10 @@ function runRaw(args: string[]): Promise<string> {
   })();
 }
 
-// The myc CLI serializes the `in_progress` enum as "inprogress" (dropped
-// underscore) in JSON, inconsistent with what it accepts on input and with
-// the frontend's Status type. Normalize every `status` field on read.
+// Back-compat shim: myc >= this commit serializes `in_progress` correctly,
+// but older binaries emitted "inprogress" (dropped underscore). Normalize
+// every `status` field on read so the frontend's Status type always matches,
+// regardless of the installed myc version.
 function normalizeStatus(node: unknown): void {
   if (Array.isArray(node)) {
     for (const item of node) normalizeStatus(item);
