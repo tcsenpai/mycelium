@@ -1,0 +1,6 @@
+node_modules/
+web/dist/
+server/public/
+data/
+*.log
+phi-report.json

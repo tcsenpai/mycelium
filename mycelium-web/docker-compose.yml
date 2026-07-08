@@ -1,0 +1,16 @@
+services:
+  mycelium-web:
+    build:
+      # Build from repo root so the Dockerfile can compile the myc CLI too.
+      context: ..
+      dockerfile: mycelium-web/Dockerfile
+    ports:
+      - "8787:8787"
+    volumes:
+      # Mount a directory that contains (or will contain) a .mycelium project.
+      # Override MYC_PROJECT_HOST to point at your project.
+      - "${MYC_PROJECT_HOST:-./data}:/data"
+    environment:
+      MYC_PROJECT_DIR: /data
+      PORT: 8787
+    restart: unless-stopped
