@@ -36,3 +36,4 @@ publish.sh
 /.mycelium/
 /mycui/plan-ui.md
 /mycui/plan.md
+.token-savior-cache.json
