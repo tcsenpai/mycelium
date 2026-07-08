@@ -23,6 +23,7 @@ A robust, production-grade task/plan manager CLI designed for reliability, agent
 - **📎 Task Cloning**: Duplicate tasks with all metadata
 - **📦 Batch Operations**: Close, tag, or move multiple tasks at once
 - **📌 Follow-ups**: Lightweight "oh-by-the-way" scratch table for non-blocking items captured mid-work
+- **🖥️ GUIs**: A [Tauri](https://tauri.app) desktop app (MycUI) and a Dockerized web UI (mycelium-web) — Kanban / DAG / Slate boards over the same data
 
 ## Installation
 
@@ -65,6 +66,49 @@ cd mycui
 bun install
 bun run tauri:dev
 ```
+
+### Web (`mycelium-web`) — Browser UI
+
+`mycelium-web` serves the same UI as MycUI (Kanban / DAG / Slate boards,
+tasks, epics, assignees, dependencies, follow-ups, dashboard) over HTTP. It
+runs a small [Bun](https://bun.sh) + Hono server that shells out to the `myc`
+CLI, so it always reflects the real CLI behavior and stays a single project
+per server.
+
+**Docker (recommended)** — point it at a directory holding (or that will
+hold) a `.mycelium/` project:
+
+```bash
+cd mycelium-web
+MYC_PROJECT_HOST=/path/to/your/project docker compose up --build
+# open http://localhost:8787
+```
+
+The image builds the `myc` CLI, builds the frontend, and runs the server.
+
+**Local dev** (needs `bun` and `myc` on `PATH`), two terminals:
+
+```bash
+# terminal 1 — API server against a project dir
+cd mycelium-web/server
+MYC_PROJECT_DIR=/path/to/project bun run dev        # :8787
+
+# terminal 2 — Vite dev server (proxies /api to :8787)
+cd mycelium-web/web
+bun install
+bun run dev                                          # open :5173
+```
+
+**Local single-process** (prod-like, no Docker):
+
+```bash
+cd mycelium-web/web && bun install && bun run build
+cp -r dist ../server/public
+cd ../server && MYC_PROJECT_DIR=/path/to/project bun run start   # :8787
+```
+
+See [`mycelium-web/README.md`](mycelium-web/README.md) for environment
+variables and known limitations.
 
 ### One-Line Install (Linux & macOS)
 
