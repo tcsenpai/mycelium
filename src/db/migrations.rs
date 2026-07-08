@@ -393,7 +393,14 @@ mod tests {
     fn fresh_db_gets_full_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
         run_migrations(&mut conn).unwrap();
-        for t in ["epics", "tasks", "dependencies", "task_notes", "epic_notes", "followups"] {
+        for t in [
+            "epics",
+            "tasks",
+            "dependencies",
+            "task_notes",
+            "epic_notes",
+            "followups",
+        ] {
             assert!(table_exists(&conn, t), "missing table {t}");
         }
         assert_eq!(get_current_version(&conn).unwrap(), CURRENT_VERSION);
@@ -423,6 +430,9 @@ mod tests {
         run_migrations(&mut conn).unwrap();
         ensure_schema(&conn).unwrap();
         ensure_schema(&conn).unwrap();
-        assert!(table_columns(&conn, "tasks").unwrap().iter().any(|c| c == "tags"));
+        assert!(table_columns(&conn, "tasks")
+            .unwrap()
+            .iter()
+            .any(|c| c == "tags"));
     }
 }
