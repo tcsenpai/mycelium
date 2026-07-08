@@ -38,6 +38,77 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         set_version(conn, 6)?;
     }
 
+    // Cross-branch safety net. The linear `version < N` gate above skips a
+    // migration whose number was already recorded on a *different* branch
+    // (e.g. branch A's v6 = embeddings, branch B's v6 = followups: switching
+    // A→B leaves _migrations at 6 so B's v6 never runs, and its table is
+    // missing). Re-asserting every table/index/column idempotently after the
+    // gate repairs that mismatch without a migration-ID rewrite.
+    // ponytail: idempotent DDL re-assert, upgrade to checksum-tracked
+    // migrations if per-branch column drift ever appears.
+    ensure_schema(conn)?;
+
+    Ok(())
+}
+
+/// Column names present on a table, via PRAGMA table_info.
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let cols = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<String>, _>>()?;
+    Ok(cols)
+}
+
+/// Add a column only if it does not already exist. ALTER TABLE ADD COLUMN is
+/// not idempotent (errors on duplicate), so guard it — required for the
+/// cross-branch re-assert to be safe.
+fn add_column_if_missing(conn: &Connection, table: &str, column: &str, ddl: &str) -> Result<()> {
+    if !table_columns(conn, table)?.iter().any(|c| c == column) {
+        conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {ddl}"), [])?;
+    }
+    Ok(())
+}
+
+/// Idempotently re-assert the full current schema. Every CREATE uses
+/// IF NOT EXISTS; every column add is guarded. Safe to run on every startup.
+fn ensure_schema(conn: &Connection) -> Result<()> {
+    // Tables + indexes (all IF NOT EXISTS) — re-run the creating migrations.
+    migrate_v1(conn)?;
+    migrate_v3(conn)?;
+    migrate_v4(conn)?;
+    migrate_v6(conn)?;
+    // epic_notes table from v5 (also IF NOT EXISTS).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS epic_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            epic_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (epic_id) REFERENCES epics(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_epic_notes_epic ON epic_notes(epic_id)",
+        [],
+    )?;
+
+    // Added columns (ALTER — guarded, since ALTER ADD COLUMN is not idempotent).
+    add_column_if_missing(conn, "tasks", "tags", "tags TEXT")?; // v2
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_tags ON tasks(tags)",
+        [],
+    )?;
+    for (col, ddl) in [
+        ("notes", "notes TEXT"),
+        ("user_info", "user_info TEXT"),
+        ("agent_questions", "agent_questions TEXT"),
+    ] {
+        add_column_if_missing(conn, "tasks", col, ddl)?; // v5
+        add_column_if_missing(conn, "epics", col, ddl)?; // v5
+    }
+
     Ok(())
 }
 
@@ -303,4 +374,55 @@ fn migrate_v6(conn: &Connection) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table_exists(conn: &Connection, name: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+            [name],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fresh_db_gets_full_schema() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        for t in ["epics", "tasks", "dependencies", "task_notes", "epic_notes", "followups"] {
+            assert!(table_exists(&conn, t), "missing table {t}");
+        }
+        assert_eq!(get_current_version(&conn).unwrap(), CURRENT_VERSION);
+    }
+
+    #[test]
+    fn cross_branch_collision_self_heals() {
+        // Simulate: another branch recorded version 6 with a DIFFERENT v6
+        // (so followups was never created here). The linear gate would skip
+        // v6; ensure_schema must still create the missing table.
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute("DROP TABLE followups", []).unwrap();
+        assert!(!table_exists(&conn, "followups"));
+        // _migrations still says version 6.
+        assert_eq!(get_current_version(&conn).unwrap(), 6);
+
+        // Re-run: gate skips (version already 6), ensure_schema repairs.
+        run_migrations(&mut conn).unwrap();
+        assert!(table_exists(&conn, "followups"), "followups not repaired");
+    }
+
+    #[test]
+    fn ensure_schema_is_idempotent() {
+        // Running twice must not error (guards ALTER ADD COLUMN duplication).
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        ensure_schema(&conn).unwrap();
+        ensure_schema(&conn).unwrap();
+        assert!(table_columns(&conn, "tasks").unwrap().iter().any(|c| c == "tags"));
+    }
 }

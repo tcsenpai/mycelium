@@ -48,6 +48,125 @@ fn test_init() {
     assert!(stdout.contains("Mycelium project initialized"));
 }
 
+/// Schema-equality guard between the CLI (`myc`) migrations and mycui's
+/// `init_schema` (mycui/src-tauri/src/db.rs). The two crates own separate
+/// schema code today (follow-up #1 tracks unifying them via a shared
+/// `mycelium-core` crate). Until then, this test fails loudly the moment
+/// either side changes a shared table/column, so drift can't ship silently.
+///
+/// Invariant: every table + column mycui creates must exist in the CLI DB
+/// with the same declared type. The CLI may have MORE (task_notes, epic_notes,
+/// linear_sync, v5 columns) — that's expected, mycui just doesn't read them.
+///
+/// If this fails: mirror the change on both sides, or land follow-up #1.
+#[test]
+fn test_schema_matches_mycui_init_schema() {
+    // Canonical expectation mirrored from mycui/src-tauri/src/db.rs::init_schema.
+    // (table, [(column, declared_type)]). Keep in lockstep with that file.
+    let expected: &[(&str, &[(&str, &str)])] = &[
+        (
+            "epics",
+            &[
+                ("id", "INTEGER"),
+                ("title", "TEXT"),
+                ("description", "TEXT"),
+                ("status", "TEXT"),
+                ("created_at", "TEXT"),
+                ("updated_at", "TEXT"),
+            ],
+        ),
+        (
+            "assignees",
+            &[
+                ("id", "INTEGER"),
+                ("name", "TEXT"),
+                ("email", "TEXT"),
+                ("github_username", "TEXT"),
+                ("created_at", "TEXT"),
+            ],
+        ),
+        (
+            "tasks",
+            &[
+                ("id", "INTEGER"),
+                ("title", "TEXT"),
+                ("description", "TEXT"),
+                ("status", "TEXT"),
+                ("priority", "TEXT"),
+                ("epic_id", "INTEGER"),
+                ("assignee_id", "INTEGER"),
+                ("due_date", "TEXT"),
+                ("tags", "TEXT"),
+                ("created_at", "TEXT"),
+                ("updated_at", "TEXT"),
+            ],
+        ),
+        (
+            "dependencies",
+            &[
+                ("id", "INTEGER"),
+                ("task_id", "INTEGER"),
+                ("depends_on_task_id", "INTEGER"),
+                ("created_at", "TEXT"),
+            ],
+        ),
+        (
+            "followups",
+            &[
+                ("id", "INTEGER"),
+                ("body", "TEXT"),
+                ("title", "TEXT"),
+                ("status", "TEXT"),
+                ("closure_reason", "TEXT"),
+                ("created_at", "TEXT"),
+                ("closed_at", "TEXT"),
+            ],
+        ),
+    ];
+
+    let temp = TempDir::new().unwrap();
+    myc_cmd(&temp).arg("init").output().expect("Failed to init");
+    let db_path = temp.path().join(".mycelium").join("mycelium.db");
+    assert!(db_path.exists(), "myc init did not create the database");
+
+    let conn = rusqlite::Connection::open(&db_path).expect("open cli db");
+
+    for (table, columns) in expected {
+        // (column_name -> declared_type) from the CLI schema.
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("prepare pragma");
+        let actual: std::collections::HashMap<String, String> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })
+            .expect("query pragma")
+            .map(|r| r.expect("row"))
+            .collect();
+
+        assert!(
+            !actual.is_empty(),
+            "CLI schema is missing table `{table}` that mycui creates"
+        );
+
+        for (col, ty) in *columns {
+            match actual.get(*col) {
+                None => panic!(
+                    "CLI schema table `{table}` is missing column `{col}` \
+                     (mycui expects it). Schemas have drifted — sync both sides \
+                     or land follow-up #1 (shared mycelium-core crate)."
+                ),
+                Some(actual_ty) => assert_eq!(
+                    actual_ty.to_uppercase(),
+                    ty.to_uppercase(),
+                    "column `{table}.{col}` type drift: CLI has `{actual_ty}`, \
+                     mycui expects `{ty}`"
+                ),
+            }
+        }
+    }
+}
+
 #[test]
 fn test_epic_create() {
     let temp = TempDir::new().unwrap();

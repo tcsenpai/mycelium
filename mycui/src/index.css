@@ -1,9 +1,9 @@
 :root {
   color-scheme: dark;
   font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  line-height: 1.5;
+  line-height: 1.55;
   font-weight: 400;
-  font-size: 13px;
+  font-size: 14px;
   background:
     radial-gradient(circle at top left, rgba(112, 145, 73, 0.12), transparent 28rem),
     radial-gradient(circle at top right, rgba(166, 129, 62, 0.1), transparent 24rem),
@@ -18,7 +18,7 @@
   --paper-strong: rgba(24, 29, 27, 0.9);
   --line: rgba(196, 212, 186, 0.08);
   --ink: #edf1e7;
-  --muted: #98a393;
+  --muted: #aeb8a6;
   --sprout: #9cc36a;
   --sprout-soft: rgba(156, 195, 106, 0.14);
   --ember: #df8665;
@@ -87,6 +87,24 @@ textarea {
   grid-template-columns: minmax(16rem, var(--rail-width, 20rem)) 0.5rem minmax(0, 1fr);
   gap: 0.5rem;
   padding: 0.75rem;
+}
+
+/* Collapsed rail: swap the wide rail column for a thin icon strip and drop
+   the resizer column, giving the workspace (and its boards) the reclaimed width. */
+.app-shell.rail-is-collapsed {
+  grid-template-columns: 2.75rem minmax(0, 1fr);
+}
+
+.project-rail-mini {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(18, 22, 20, 0.96), rgba(16, 19, 18, 0.94));
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0;
 }
 
 .project-rail,
@@ -278,6 +296,12 @@ textarea {
   gap: 0.35rem;
 }
 
+.epic-stack {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
 .muted-panel,
 .recent-folder,
 .epic-chip {
@@ -323,6 +347,41 @@ textarea {
 .epic-chip.is-active {
   border-color: rgba(93, 122, 59, 0.34);
   background: rgba(93, 122, 59, 0.1);
+}
+
+.epic-chip.is-done {
+  opacity: 0.55;
+}
+
+.epic-chip.is-done em {
+  color: var(--muted);
+}
+
+.rail-section-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.text-toggle {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: rgba(23, 29, 26, 0.78);
+  transition: color 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.text-toggle:hover {
+  color: var(--ink);
+}
+
+.text-toggle.is-active {
+  border-color: rgba(93, 122, 59, 0.34);
+  background: rgba(93, 122, 59, 0.12);
+  color: var(--sprout);
 }
 
 .workspace-hero {
@@ -428,6 +487,12 @@ textarea {
   grid-template-columns: minmax(0, 1fr) 0.5rem minmax(18rem, var(--detail-width, 26rem));
   gap: 0.75rem;
   flex: 1;
+}
+
+/* Detail panel hidden (its resizer + aside are unmounted in JSX): collapse to
+   a single full-width column so the board fills the space. */
+.detail-is-collapsed .workspace-grid {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .main-column,
@@ -1768,4 +1833,360 @@ textarea {
 
 .ghost-button.danger {
   color: var(--danger, #ef4444);
+}
+
+/* Board layout switch (Kanban / Slate / DAG) */
+.panel-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.layout-switch .view-switch-button span {
+  font-size: 0.76rem;
+}
+
+/* Kanban board */
+.kanban-grid {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+  overflow: hidden;
+}
+
+.kanban-column {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(20, 25, 23, 0.5);
+  overflow: hidden;
+}
+
+.kanban-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.kanban-column-count {
+  min-width: 1.4rem;
+  text-align: center;
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.kanban-column-blocked .kanban-column-head { color: var(--ember); }
+.kanban-column-in_progress .kanban-column-head { color: var(--gold); }
+.kanban-column-open .kanban-column-head { color: var(--sprout); }
+
+.kanban-column-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.5rem;
+}
+
+.kanban-column-empty {
+  margin: 0;
+  padding: 0.6rem 0.2rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.task-row.is-compact {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.4rem;
+  padding: 0.55rem 0.6rem;
+}
+
+.task-row.is-compact .task-row-side {
+  flex-direction: row;
+  justify-items: start;
+  gap: 0.5rem;
+}
+
+/* Epic slate swimlanes */
+.slate-grid {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin-top: 0.8rem;
+  padding-right: 0.2rem;
+}
+
+.slate-lane {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(20, 25, 23, 0.5);
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.slate-lane-head {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.slate-lane-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.slate-lane-title strong {
+  font-size: 0.92rem;
+}
+
+.slate-lane-title span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.slate-lane-track {
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.slate-lane-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--sprout), color-mix(in oklab, var(--sprout) 65%, white));
+}
+
+.slate-lane-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.slate-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 16rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  background: rgba(23, 29, 26, 0.85);
+  color: var(--ink);
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.slate-chip:hover {
+  transform: translateY(-1px);
+}
+
+.slate-chip.is-selected {
+  border-color: rgba(93, 122, 59, 0.4);
+  background: rgba(93, 122, 59, 0.12);
+}
+
+.slate-chip.is-closed {
+  opacity: 0.6;
+}
+
+.slate-chip.is-in-progress {
+  border-color: rgba(208, 173, 109, 0.3);
+}
+
+.slate-chip-id {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.slate-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
+.priority-pill-dot.is-critical { color: #df8665; }
+.priority-pill-dot.is-high { color: #d0ad6d; }
+.priority-pill-dot.is-medium { color: #9cc36a; }
+.priority-pill-dot.is-low { color: #8ba1b3; }
+
+/* DAG as a board layout — fill the main column */
+.board-dag-wrap {
+  min-height: 0;
+  flex: 1;
+  margin-top: 0.8rem;
+  overflow: auto;
+}
+
+@media (max-width: 1180px) {
+  .kanban-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 800px) {
+  .kanban-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-head-tools {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ── Density + collapse revisit (best-ui 2026) ───────────────────────── */
+
+/* Compact icon-only button for collapse toggles + disclosures. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: rgba(20, 27, 24, 0.72);
+  transition: color 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.icon-button:hover {
+  color: var(--ink);
+}
+
+.icon-button.is-active {
+  border-color: rgba(93, 122, 59, 0.34);
+  background: rgba(93, 122, 59, 0.12);
+  color: var(--sprout);
+}
+
+.rail-collapse-button {
+  margin-left: auto;
+}
+
+/* Tighter hero: title switch on the left, actions on the right, no copy. */
+.workspace-hero {
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.1rem 0.2rem;
+}
+
+/* Thin inline stat bar (replaces the 4 big summary cards). */
+.stat-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.stat-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+
+.stat-pill-label {
+  color: var(--muted);
+}
+
+.stat-pill-value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.stat-pill.accent-ember .stat-pill-value {
+  color: var(--ember);
+}
+
+.stat-pill.accent-gold .stat-pill-value {
+  color: var(--gold);
+}
+
+/* Collapsible rail section header. */
+.rail-section-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.rail-section-toggle:hover span {
+  color: var(--ink);
+}
+
+/* Text never clips in the detail sidebar or expanded (non-compact) cards. */
+.detail-column .task-row-titleline strong,
+.detail-column strong,
+.detail-column .mini-task strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.task-row:not(.is-compact) .task-row-titleline {
+  flex-wrap: wrap;
+}
+
+.task-row:not(.is-compact) .task-row-titleline strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.task-row.is-compact .task-row-titleline strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
+}
+
+.mini-task strong {
+  white-space: normal;
+}
+
+.slate-chip-title {
+  max-width: 22rem;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

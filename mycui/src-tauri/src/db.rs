@@ -167,13 +167,13 @@ impl Database {
         )?;
 
         let open_tasks: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'open'",
+            "SELECT COUNT(*) FROM tasks WHERE status IN ('open', 'in_progress')",
             [],
             |row| row.get(0),
         )?;
 
         let overdue_tasks: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'open' AND due_date < ?",
+            "SELECT COUNT(*) FROM tasks WHERE status IN ('open', 'in_progress') AND due_date < ?",
             [Local::now().naive_local().date().to_string()],
             |row| row.get(0),
         )?;
@@ -187,7 +187,7 @@ impl Database {
         )?;
 
         let high_priority_open: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'open' AND priority IN ('high', 'critical')",
+            "SELECT COUNT(*) FROM tasks WHERE status IN ('open', 'in_progress') AND priority IN ('high', 'critical')",
             [],
             |row| row.get(0),
         )?;

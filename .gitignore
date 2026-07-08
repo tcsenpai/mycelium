@@ -34,3 +34,5 @@ publish.sh
 
 # Local runtime DB (created by `myc init` in user projects, not crate root)
 /.mycelium/
+/mycui/plan-ui.md
+/mycui/plan.md

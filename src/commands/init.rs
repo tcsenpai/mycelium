@@ -195,24 +195,31 @@ Mycelium's state must remain predictable and auditable at all times.
 "#;
 
 /// Ensure `.mycelium/` exists with gitignore and an initialized DB.
-/// Returns true if the project was just created, false if it already existed.
+/// Returns true if the database was just created, false if it already existed.
+///
+/// The DB file — not the directory — is the source of truth for "initialized".
+/// A dir that exists without a db file (partial/interrupted init, or the db was
+/// deleted) is repaired: the db is created and the dir backfilled as needed.
 fn ensure_project_initialized(mycelium_dir: &Path) -> Result<bool> {
-    if mycelium_dir.exists() {
+    let db_path = mycelium_dir.join("mycelium.db");
+    if db_path.exists() {
         return Ok(false);
     }
 
     fs::create_dir_all(mycelium_dir)?;
 
-    let gitignore_content = r#"# Mycelium database
+    let gitignore_path = mycelium_dir.join(".gitignore");
+    if !gitignore_path.exists() {
+        let gitignore_content = r#"# Mycelium database
 # The database file is git-trackable but WAL files are not
 *.db-wal
 *.db-shm
 # Temporary files
 *.tmp
 "#;
-    fs::write(mycelium_dir.join(".gitignore"), gitignore_content)?;
+        fs::write(&gitignore_path, gitignore_content)?;
+    }
 
-    let db_path = mycelium_dir.join("mycelium.db");
     Database::open(&db_path)?;
 
     println!("{} Mycelium project initialized", SUCCESS_PREFIX.green());
@@ -227,7 +234,10 @@ pub fn execute(force_init: bool) -> Result<()> {
     let mycelium_dir = cwd.join(".mycelium");
     let agents_md_path = cwd.join("AGENTS.md");
 
-    if mycelium_dir.exists() && !force_init {
+    // The db file — not the dir — determines whether we're initialized. A dir
+    // that exists without the db (interrupted init, deleted db) still needs work.
+    let db_exists = mycelium_dir.join("mycelium.db").exists();
+    if db_exists && !force_init {
         println!(
             "{} Mycelium project already initialized",
             INFO_PREFIX.blue()
@@ -497,6 +507,29 @@ mod tests {
         let wrapped = format!("# Agent Instructions\n\nSome user content.\n\n{}\n", block);
         let (_s, _e, ver) = find_marker_block(&wrapped).expect("must locate marker");
         assert_eq!(ver, Some(AGENTS_MD_VERSION));
+    }
+
+    #[test]
+    fn ensure_init_repairs_dir_without_db() {
+        // Regression: a .mycelium/ dir that exists but has no db file must be
+        // treated as uninitialized and repaired, not reported "already done".
+        let tmp = std::env::temp_dir().join(format!("myc-init-test-{}", std::process::id()));
+        let mycelium_dir = tmp.join(".mycelium");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&mycelium_dir).unwrap();
+        assert!(mycelium_dir.exists());
+        assert!(!mycelium_dir.join("mycelium.db").exists());
+
+        // dir present, db absent → must create the db and report "created".
+        let created = ensure_project_initialized(&mycelium_dir).unwrap();
+        assert!(created, "should create db when dir exists but db missing");
+        assert!(mycelium_dir.join("mycelium.db").exists());
+
+        // Second call is a no-op now that the db exists.
+        let created_again = ensure_project_initialized(&mycelium_dir).unwrap();
+        assert!(!created_again, "should be idempotent once db exists");
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

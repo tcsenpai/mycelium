@@ -14,14 +14,23 @@ import {
   Briefcase,
   CalendarDays,
   CheckCheck,
-  ChevronsUpDown,
+  ChevronDown,
+  ChevronRight,
   CircleDot,
+  Columns,
   FolderOpen,
   Layers3,
   Loader,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Pin,
   Plus,
+  Rows,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   X,
@@ -49,9 +58,12 @@ import {
 } from './lib/api';
 import type { TaskUpdateInput } from './lib/api';
 import type {
+  Assignee,
+  Epic,
   Followup,
   FollowupStatus,
   Priority,
+  Status,
   Task,
 } from './lib/types';
 import { followupStatusColors, followupStatusLabels } from './lib/types';
@@ -68,9 +80,27 @@ const QUERY_KEYS = {
   followupCounts: ['followup-counts'],
 };
 
-type StatusFilter = 'all' | 'open' | 'in_progress' | 'closed' | 'blocked' | 'overdue';
+type StatusFilter = 'open' | 'in_progress' | 'closed' | 'blocked' | 'overdue';
+const STATUS_FILTERS: StatusFilter[] = ['open', 'in_progress', 'closed', 'blocked', 'overdue'];
+
+// A task matches a single status filter. Selected filters combine with OR.
+function matchesStatusFilter(task: Task, filter: StatusFilter): boolean {
+  switch (filter) {
+    case 'open':
+    case 'in_progress':
+    case 'closed':
+      return task.status === filter;
+    case 'blocked':
+      return task.status !== 'closed' && task.blocked_by.length > 0;
+    case 'overdue': {
+      const due = task.due_date ? new Date(task.due_date) : null;
+      return task.status !== 'closed' && due !== null && due.getTime() < Date.now();
+    }
+  }
+}
 type PriorityFilter = 'all' | Priority;
 type WorkspaceMode = 'overview' | 'analytics' | 'followups';
+type BoardLayout = 'kanban' | 'slate' | 'dag';
 type SmartFilter = 'all' | 'focus' | 'up-next' | 'unassigned' | 'unscheduled' | 'recent';
 type DueFilter = 'all' | 'overdue' | 'today' | 'soon' | 'none';
 type SortMode = 'priority' | 'due' | 'updated' | 'title';
@@ -142,6 +172,20 @@ function priorityRank(priority: Priority) {
 
 function priorityLabel(priority: Priority) {
   return priority.charAt(0).toUpperCase() + priority.slice(1);
+}
+
+function statusFilterLabel(filter: StatusFilter) {
+  if (filter === 'in_progress') {
+    return 'In progress';
+  }
+  return filter.charAt(0).toUpperCase() + filter.slice(1);
+}
+
+function statusLabel(status: Status) {
+  if (status === 'in_progress') {
+    return 'In progress';
+  }
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 function taskTone(priority: Priority) {
@@ -382,20 +426,57 @@ function describeError(error: unknown) {
   }
 }
 
+function readPersistedBool(key: string, fallback: boolean): boolean {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved === 'true') return true;
+    if (saved === 'false') return false;
+  } catch {
+    // localStorage unavailable — use fallback
+  }
+  return fallback;
+}
+
+function writePersistedBool(key: string, value: boolean) {
+  try {
+    localStorage.setItem(key, String(value));
+  } catch {
+    // localStorage unavailable — value just won't persist
+  }
+}
+
 function App() {
   const queryClient = useQueryClient();
   const composerTitleRef = useRef<HTMLInputElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const workspaceGridRef = useRef<HTMLElement>(null);
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [railCollapsed, setRailCollapsed] = useState(() => readPersistedBool('mycui-rail-collapsed', false));
+  const [detailCollapsed, setDetailCollapsed] = useState(() => readPersistedBool('mycui-detail-collapsed', false));
+  const [filtersOpen, setFiltersOpen] = useState(() => readPersistedBool('mycui-filters-open', false));
+  const [recentOpen, setRecentOpen] = useState(() => readPersistedBool('mycui-recent-open', false));
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+
+  const [statusFilters, setStatusFilters] = useState<Set<StatusFilter>>(new Set());
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
   const [smartFilter, setSmartFilter] = useState<SmartFilter>('all');
   const [dueFilter, setDueFilter] = useState<DueFilter>('all');
   const [sortMode, setSortMode] = useState<SortMode>('priority');
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('overview');
+  const [boardLayout, setBoardLayout] = useState<BoardLayout>(() => {
+    try {
+      const saved = localStorage.getItem('mycui-board-layout');
+      if (saved === 'kanban' || saved === 'slate' || saved === 'dag') {
+        return saved;
+      }
+    } catch {
+      // localStorage unavailable — fall through to default
+    }
+    return 'kanban';
+  });
   const [analyticsWindow, setAnalyticsWindow] = useState<AnalyticsWindow>(30);
   const [selectedEpicId, setSelectedEpicId] = useState<number | null>(null);
+  const [hideClosedEpics, setHideClosedEpics] = useState(false);
   const [queueEpicFilter, setQueueEpicFilter] = useState('all');
   const [queueAssigneeFilter, setQueueAssigneeFilter] = useState('all');
   const [queueTagFilter, setQueueTagFilter] = useState('all');
@@ -614,6 +695,36 @@ function App() {
   }, [composerOpen]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem('mycui-board-layout', boardLayout);
+    } catch {
+      // localStorage unavailable — layout just won't persist
+    }
+  }, [boardLayout]);
+
+  useEffect(() => writePersistedBool('mycui-rail-collapsed', railCollapsed), [railCollapsed]);
+  useEffect(() => writePersistedBool('mycui-detail-collapsed', detailCollapsed), [detailCollapsed]);
+  useEffect(() => writePersistedBool('mycui-filters-open', filtersOpen), [filtersOpen]);
+  useEffect(() => writePersistedBool('mycui-recent-open', recentOpen), [recentOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ignore when typing in a field.
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
+        return;
+      }
+      if (event.key === '[') {
+        setRailCollapsed((current) => !current);
+      } else if (event.key === ']') {
+        setDetailCollapsed((current) => !current);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
     if (!composerOpen) {
       return;
     }
@@ -669,19 +780,11 @@ function App() {
     );
   }
 
-  if (statusFilter === 'open' || statusFilter === 'in_progress' || statusFilter === 'closed') {
-    visibleTasks = visibleTasks.filter((task) => task.status === statusFilter);
-  }
-
-  if (statusFilter === 'blocked') {
-    visibleTasks = visibleTasks.filter((task) => task.status === 'open' && task.blocked_by.length > 0);
-  }
-
-  if (statusFilter === 'overdue') {
-    visibleTasks = visibleTasks.filter((task) => {
-      const due = task.due_date ? new Date(task.due_date) : null;
-      return task.status === 'open' && due !== null && due.getTime() < Date.now();
-    });
+  if (statusFilters.size > 0) {
+    const selected = [...statusFilters];
+    visibleTasks = visibleTasks.filter((task) =>
+      selected.some((filter) => matchesStatusFilter(task, filter))
+    );
   }
 
   if (dueFilter !== 'all') {
@@ -798,6 +901,8 @@ function App() {
     visibleTasks[0] ??
     null;
 
+  const editingTask = editingTaskId !== null ? tasks.find((task) => task.id === editingTaskId) ?? null : null;
+
   useEffect(() => {
     setDetailDraft({
       title: selectedTask?.title ?? '',
@@ -823,13 +928,21 @@ function App() {
   const epicsWithStats = epics.map((epic) => {
     const epicTasks = tasks.filter((task) => task.epic_id === epic.id);
     const totalTasks = epicTasks.length;
-    const openTaskCount = epicTasks.filter((task) => task.status === 'open').length;
+    const openTaskCount = epicTasks.filter((task) => task.status !== 'closed').length;
+    // An epic is "done" when it has tasks and none remain open. Empty epics are
+    // never auto-closed. An explicit 'closed' epic status also counts.
+    const isDone = epic.status === 'closed' || (totalTasks > 0 && openTaskCount === 0);
     return {
       ...epic,
       total_tasks: totalTasks,
       open_tasks: openTaskCount,
+      is_done: isDone,
     };
   });
+  const doneEpicCount = epicsWithStats.filter((epic) => epic.is_done).length;
+  const visibleEpics = hideClosedEpics
+    ? epicsWithStats.filter((epic) => !epic.is_done)
+    : epicsWithStats;
   const highSignalTasks = openTasks
     .filter((task) => task.priority === 'high' || task.priority === 'critical')
     .slice(0, 3);
@@ -840,7 +953,7 @@ function App() {
     })
     .slice(0, 3);
   const activeFilterCount = [
-    statusFilter !== 'all',
+    statusFilters.size > 0,
     priorityFilter !== 'all',
     smartFilter !== 'all',
     dueFilter !== 'all',
@@ -1124,8 +1237,20 @@ function App() {
     await createTaskMutation.mutateAsync(composer);
   }
 
+  function toggleStatusFilter(filter: StatusFilter) {
+    setStatusFilters((current) => {
+      const next = new Set(current);
+      if (next.has(filter)) {
+        next.delete(filter);
+      } else {
+        next.add(filter);
+      }
+      return next;
+    });
+  }
+
   function resetQueueFilters() {
-    setStatusFilter('all');
+    setStatusFilters(new Set());
     setPriorityFilter('all');
     setSmartFilter('all');
     setDueFilter('all');
@@ -1196,7 +1321,27 @@ function App() {
 
   return (
     <>
-      <div className="app-shell" ref={shellRef} style={{ ['--rail-width' as string]: `${railWidth}px` }}>
+      <div
+        className={`app-shell ${railCollapsed ? 'rail-is-collapsed' : ''} ${detailCollapsed ? 'detail-is-collapsed' : ''}`}
+        ref={shellRef}
+        style={{ ['--rail-width' as string]: `${railWidth}px` }}
+      >
+      {railCollapsed ? (
+        <aside className="project-rail-mini">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => setRailCollapsed(false)}
+            title="Expand sidebar ([)"
+            aria-label="Expand sidebar"
+          >
+            <PanelLeftOpen size={18} />
+          </button>
+          <div className="brand-mark">
+            <Sparkles size={18} />
+          </div>
+        </aside>
+      ) : (
       <aside className="project-rail">
         <div className="brand-block">
           <div className="brand-mark">
@@ -1206,6 +1351,15 @@ function App() {
             <p className="eyebrow">Native desktop</p>
             <h1>Mycelium</h1>
           </div>
+          <button
+            className="icon-button rail-collapse-button"
+            type="button"
+            onClick={() => setRailCollapsed(true)}
+            title="Collapse sidebar ([)"
+            aria-label="Collapse sidebar"
+          >
+            <PanelLeftClose size={16} />
+          </button>
         </div>
 
         <div className="project-card">
@@ -1230,24 +1384,38 @@ function App() {
         <section className="rail-section">
           <div className="rail-section-head">
             <span>Epics</span>
-            <Layers3 size={16} />
+            <div className="rail-section-head-tools">
+              {doneEpicCount > 0 ? (
+                <button
+                  type="button"
+                  className={`text-toggle ${hideClosedEpics ? 'is-active' : ''}`}
+                  onClick={() => setHideClosedEpics((current) => !current)}
+                  title={hideClosedEpics ? 'Show completed epics' : 'Hide completed epics'}
+                >
+                  {hideClosedEpics ? `Show done (${doneEpicCount})` : 'Hide done'}
+                </button>
+              ) : null}
+              <Layers3 size={16} />
+            </div>
           </div>
           <div className="epic-stack">
             {epics.length === 0 ? (
               <div className="muted-panel">No epics yet. The app still works fine for task-only projects.</div>
+            ) : visibleEpics.length === 0 ? (
+              <div className="muted-panel">All epics complete. Toggle “Show done” to see them.</div>
             ) : (
-              epicsWithStats.slice(0, 6).map((epic) => {
+              visibleEpics.map((epic) => {
                 const progress = epic.total_tasks > 0 ? Math.round(((epic.total_tasks - epic.open_tasks) / epic.total_tasks) * 100) : 0;
                 return (
                   <button
                     key={epic.id}
-                    className={`epic-chip ${selectedEpicId === epic.id ? 'is-active' : ''}`}
+                    className={`epic-chip ${selectedEpicId === epic.id ? 'is-active' : ''} ${epic.is_done ? 'is-done' : ''}`}
                     type="button"
                     onClick={() => setSelectedEpicId((current) => (current === epic.id ? null : epic.id))}
                   >
                     <div>
                       <strong>{epic.title}</strong>
-                      <span>{epic.open_tasks} open</span>
+                      <span>{epic.is_done ? 'Complete' : `${epic.open_tasks} open`}</span>
                     </div>
                     <em>{progress}%</em>
                   </button>
@@ -1258,96 +1426,98 @@ function App() {
         </section>
 
         <section className="rail-section">
-          <div className="rail-section-head">
+          <button
+            className="rail-section-head rail-section-toggle"
+            type="button"
+            onClick={() => setRecentOpen((current) => !current)}
+            aria-expanded={recentOpen}
+          >
             <span>Recent folders</span>
-            <ChevronsUpDown size={16} />
-          </div>
-          <div className="recent-stack">
-            {recentFolders.length === 0 ? (
-              <div className="muted-panel">No recent projects yet.</div>
-            ) : (
-              recentFolders.map((folder) => (
-                <button
-                  key={folder}
-                  className="recent-folder"
-                  type="button"
-                  onClick={() => openProjectMutation.mutate(folder)}
-                >
-                  <span>{folder.split('/').pop()}</span>
-                  <small>{folder}</small>
-                </button>
-              ))
-            )}
-          </div>
+            {recentOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </button>
+          {recentOpen ? (
+            <div className="recent-stack">
+              {recentFolders.length === 0 ? (
+                <div className="muted-panel">No recent projects yet.</div>
+              ) : (
+                recentFolders.map((folder) => (
+                  <button
+                    key={folder}
+                    className="recent-folder"
+                    type="button"
+                    onClick={() => openProjectMutation.mutate(folder)}
+                  >
+                    <span>{folder.split('/').pop()}</span>
+                    <small>{folder}</small>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
         </section>
       </aside>
-      <div
-        className="pane-resizer pane-resizer-shell"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize project rail"
-        onPointerDown={() => startPaneResize('rail')}
-      />
+      )}
+      {railCollapsed ? null : (
+        <div
+          className="pane-resizer pane-resizer-shell"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize project rail"
+          onPointerDown={() => startPaneResize('rail')}
+        />
+      )}
 
       <main className="workspace">
         <header className="workspace-hero">
-          <div>
-            <p className="eyebrow">Overview</p>
-            <h2>Project cockpit</h2>
-            <p className="hero-copy">
-              A calmer view of the work: compact queue in the middle, context on the right, and quick capture on demand.
-            </p>
+          <div className="view-switch">
+            <button
+              className={`view-switch-button ${workspaceMode === 'overview' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setWorkspaceMode('overview')}
+            >
+              <Layers3 size={16} />
+              <span>Overview</span>
+            </button>
+            <button
+              className={`view-switch-button ${workspaceMode === 'analytics' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setWorkspaceMode('analytics')}
+            >
+              <BarChart3 size={16} />
+              <span>Analytics</span>
+            </button>
+            <button
+              className={`view-switch-button ${workspaceMode === 'followups' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setWorkspaceMode('followups')}
+            >
+              <Pin size={16} />
+              <span>Follow-ups</span>
+            </button>
           </div>
 
           <div className="hero-actions">
-            <div className="view-switch">
-              <button
-                className={`view-switch-button ${workspaceMode === 'overview' ? 'is-active' : ''}`}
-                type="button"
-                onClick={() => setWorkspaceMode('overview')}
-              >
-                <Layers3 size={16} />
-                <span>Overview</span>
-              </button>
-              <button
-                className={`view-switch-button ${workspaceMode === 'analytics' ? 'is-active' : ''}`}
-                type="button"
-                onClick={() => setWorkspaceMode('analytics')}
-              >
-                <BarChart3 size={16} />
-                <span>Analytics</span>
-              </button>
-              <button
-                className={`view-switch-button ${workspaceMode === 'followups' ? 'is-active' : ''}`}
-                type="button"
-                onClick={() => setWorkspaceMode('followups')}
-              >
-                <Pin size={16} />
-                <span>Follow-ups</span>
-              </button>
-            </div>
             <label className="search-field">
               <Search size={16} />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search titles, descriptions, people, tags"
+                placeholder="Search tasks…"
               />
             </label>
             <button className="primary-button" type="button" onClick={() => setComposerOpen((current) => !current)}>
               {composerOpen ? <X size={16} /> : <Plus size={16} />}
-              <span>{composerOpen ? 'Close composer' : 'New task'}</span>
+              <span>{composerOpen ? 'Close' : 'New task'}</span>
             </button>
           </div>
         </header>
 
-        <section className="summary-strip">
+        <section className="stat-bar">
           {summaryCards.map((card) => (
-            <article key={card.label} className={`summary-card accent-${card.accent}`}>
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.hint}</small>
-            </article>
+            <span key={card.label} className={`stat-pill accent-${card.accent}`} title={card.hint}>
+              <span className="stat-pill-label">{card.label}</span>
+              <strong className="stat-pill-value">{card.value}</strong>
+            </span>
           ))}
         </section>
 
@@ -1371,9 +1541,71 @@ function App() {
                   <p className="eyebrow">Queue</p>
                   <h3>Tasks in motion</h3>
                 </div>
-                <div className="task-count">
-                  <CircleDot size={16} />
-                  <span>{visibleTasks.length} shown</span>
+                <div className="panel-head-tools">
+                  <div className="view-switch layout-switch">
+                    <button
+                      className={`view-switch-button ${boardLayout === 'kanban' ? 'is-active' : ''}`}
+                      type="button"
+                      onClick={() => setBoardLayout('kanban')}
+                      title="Kanban board"
+                    >
+                      <Columns size={15} />
+                      <span>Kanban</span>
+                    </button>
+                    <button
+                      className={`view-switch-button ${boardLayout === 'slate' ? 'is-active' : ''}`}
+                      type="button"
+                      onClick={() => setBoardLayout('slate')}
+                      title="Epic slate"
+                    >
+                      <Rows size={15} />
+                      <span>Slate</span>
+                    </button>
+                    <button
+                      className={`view-switch-button ${boardLayout === 'dag' ? 'is-active' : ''}`}
+                      type="button"
+                      onClick={() => setBoardLayout('dag')}
+                      title="Dependency graph"
+                    >
+                      <Network size={15} />
+                      <span>DAG</span>
+                    </button>
+                  </div>
+                  <div className="task-count">
+                    <CircleDot size={16} />
+                    <span>{visibleTasks.length}</span>
+                  </div>
+                  <button
+                    className={`icon-button ${filtersOpen ? 'is-active' : ''}`}
+                    type="button"
+                    onClick={() => setFiltersOpen((current) => !current)}
+                    title="Toggle filters"
+                    aria-label="Toggle filters"
+                    aria-expanded={filtersOpen}
+                  >
+                    <SlidersHorizontal size={16} />
+                  </button>
+                  {detailCollapsed ? (
+                    <button
+                      className="icon-button"
+                      type="button"
+                      onClick={() => setDetailCollapsed(false)}
+                      title="Show detail panel (])"
+                      aria-label="Show detail panel"
+                    >
+                      <PanelRightOpen size={16} />
+                    </button>
+                  ) : (
+                    <button
+                      className="icon-button"
+                      type="button"
+                      onClick={() => setDetailCollapsed(true)}
+                      title="Hide detail panel (])"
+                      aria-label="Hide detail panel"
+                    >
+                      <PanelRightClose size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1398,6 +1630,7 @@ function App() {
                   ))}
                 </div>
 
+                {filtersOpen ? (
                 <div className="manual-filter-row">
                   <label className="filter-select">
                     <span>Epic</span>
@@ -1453,37 +1686,47 @@ function App() {
                     </select>
                   </label>
                 </div>
-              </div>
+                ) : null}
 
-              <div className="filter-row queue-filter-row">
-                <div className="chip-group">
-                  {(['all', 'open', 'in_progress', 'blocked', 'overdue', 'closed'] as StatusFilter[]).map((filter) => (
+                <div className="filter-row queue-filter-row">
+                  <div className="chip-group">
                     <button
-                      key={filter}
-                      className={`filter-chip ${statusFilter === filter ? 'is-active' : ''}`}
+                      className={`filter-chip ${statusFilters.size === 0 ? 'is-active' : ''}`}
                       type="button"
-                      onClick={() => setStatusFilter(filter)}
+                      onClick={() => setStatusFilters(new Set())}
                     >
-                      {filter}
+                      All
                     </button>
-                  ))}
-                </div>
+                    {STATUS_FILTERS.map((filter) => (
+                      <button
+                        key={filter}
+                        className={`filter-chip ${statusFilters.has(filter) ? 'is-active' : ''}`}
+                        type="button"
+                        onClick={() => toggleStatusFilter(filter)}
+                      >
+                        {statusFilterLabel(filter)}
+                      </button>
+                    ))}
+                  </div>
 
-                <div className="chip-group queue-filter-actions">
-                  {(['all', 'critical', 'high', 'medium', 'low'] as PriorityFilter[]).map((filter) => (
-                    <button
-                      key={filter}
-                      className={`filter-chip ${priorityFilter === filter ? 'is-active' : ''}`}
-                      type="button"
-                      onClick={() => setPriorityFilter(filter)}
-                    >
-                      {filter}
+                  {filtersOpen ? (
+                  <div className="chip-group queue-filter-actions">
+                    {(['all', 'critical', 'high', 'medium', 'low'] as PriorityFilter[]).map((filter) => (
+                      <button
+                        key={filter}
+                        className={`filter-chip ${priorityFilter === filter ? 'is-active' : ''}`}
+                        type="button"
+                        onClick={() => setPriorityFilter(filter)}
+                      >
+                        {filter}
+                      </button>
+                    ))}
+                    <button className="ghost-button queue-clear-button" type="button" onClick={resetQueueFilters} disabled={activeFilterCount === 0}>
+                      <X size={14} />
+                      <span>Clear {activeFilterCount > 0 ? activeFilterCount : ''}</span>
                     </button>
-                  ))}
-                  <button className="ghost-button queue-clear-button" type="button" onClick={resetQueueFilters} disabled={activeFilterCount === 0}>
-                    <X size={14} />
-                    <span>Clear {activeFilterCount > 0 ? activeFilterCount : ''}</span>
-                  </button>
+                  </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -1497,58 +1740,43 @@ function App() {
                   <Briefcase size={20} />
                   <span>No tasks match the current filters.</span>
                 </div>
+              ) : boardLayout === 'kanban' ? (
+                <KanbanBoard
+                  tasks={visibleTasks}
+                  selectedTaskId={selectedTask?.id ?? null}
+                  onSelect={(id) => startTransition(() => setSelectedTaskId(id))}
+                  onEdit={(id) => setEditingTaskId(id)}
+                />
+              ) : boardLayout === 'slate' ? (
+                <EpicSlate
+                  tasks={visibleTasks}
+                  epics={epics}
+                  selectedTaskId={selectedTask?.id ?? null}
+                  onSelect={(id) => startTransition(() => setSelectedTaskId(id))}
+                  onEdit={(id) => setEditingTaskId(id)}
+                />
               ) : (
-                <div className="task-list">
-                  {visibleTasks.map((task) => {
-                    const due = dueState(task);
-                    const tag = firstTag(task.tags);
-                    const selected = selectedTask?.id === task.id;
-
-                    return (
-                      <button
-                        key={task.id}
-                        type="button"
-                        className={`task-row ${taskTone(task.priority)} ${selected ? 'is-selected' : ''}`}
-                        onClick={() => startTransition(() => setSelectedTaskId(task.id))}
-                      >
-                        <div className="task-row-main">
-                          <div className="task-row-titleline">
-                            <span className={`priority-pill is-${task.priority}`}>
-                              <span className="priority-pill-dot" />
-                              {priorityLabel(task.priority)}
-                            </span>
-                            <strong>{task.title}</strong>
-                            <span className={`status-pill ${task.status === 'closed' ? 'is-closed' : task.status === 'in_progress' ? 'is-in-progress' : 'is-open'}`}>
-                              {task.status}
-                            </span>
-                          </div>
-
-                          <div className="task-row-meta">
-                            <span>{task.epic_title || 'No epic'}</span>
-                            <span>{task.assignee_name || 'Unassigned'}</span>
-                            {tag ? <span>#{tag}</span> : null}
-                            {task.blocked_by.length > 0 ? <span>Blocked by {task.blocked_by.length}</span> : null}
-                            {task.blocks.length > 0 ? <span>Blocks {task.blocks.length}</span> : null}
-                          </div>
-
-                          <p className="task-card-preview">
-                            {stripMarkdown(task.description) || 'No description yet.'}
-                          </p>
-                        </div>
-
-                        <div className="task-row-side">
-                          <span className="task-row-id">#{task.id}</span>
-                          {due ? <span className={`due-pill ${due.tone}`}>{due.label}</span> : null}
-                          <span className="task-row-updated">{formatDate(task.updated_at)}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div className="dependency-graph-wrap board-dag-wrap">
+                  <DependencyGraph
+                    nodes={dependencyGraphNodes}
+                    edges={dependencyGraphEdges}
+                    graphLayers={graphLayers}
+                    columnGap={columnGap}
+                    activeNodeId={activeDependencyNodeId}
+                    activeTask={activeDependencyTask}
+                    activeLinks={activeDependencyLinks}
+                    selectedTaskId={selectedTask?.id ?? null}
+                    hoveredNodeId={hoveredDependencyNodeId}
+                    setHoveredNodeId={setHoveredDependencyNodeId}
+                    onSelectNode={(id) => startTransition(() => setSelectedTaskId(id))}
+                  />
                 </div>
               )}
             </div>
           </div>
 
+          {detailCollapsed ? null : (
+          <>
           <div
             className="pane-resizer pane-resizer-workspace"
             role="separator"
@@ -1638,6 +1866,7 @@ function App() {
                         disabled={updateTaskMutation.isPending}
                       >
                         <option value="open">Open</option>
+                        <option value="in_progress">In Progress</option>
                         <option value="closed">Closed</option>
                       </select>
                     </label>
@@ -1763,6 +1992,8 @@ function App() {
               </div>
             </div>
           </aside>
+          </>
+          )}
         </section>
         ) : workspaceMode === 'analytics' ? (
         <section className="analytics-grid">
@@ -1986,135 +2217,22 @@ function App() {
               <span className="panel-note">Hotspots surface tasks with the most dependency pressure</span>
             </div>
             <div className="dependency-graph-wrap">
-              {dependencyGraphNodes.length === 0 ? (
-                <div className="muted-panel">No dependency edges to visualize yet.</div>
-              ) : (
-                <div className="dependency-graph-layout">
-                  <svg viewBox="0 0 720 340" className="dependency-graph" role="img" aria-label="Task dependency graph">
-                    <defs>
-                      <marker
-                        id="dependency-arrow"
-                        viewBox="0 0 10 10"
-                        refX="8"
-                        refY="5"
-                        markerWidth="6"
-                        markerHeight="6"
-                        orient="auto-start-reverse"
-                      >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(226, 230, 227, 0.6)" />
-                      </marker>
-                    </defs>
-                    {graphLayers.map((layer, index) => {
-                      const labelX = 80 + columnGap * index;
-                      return (
-                        <g key={layer}>
-                          <text x={labelX} y="18" textAnchor="middle" className="dependency-layer-label">
-                            {index === 0 ? 'Roots' : `Layer ${index + 1}`}
-                          </text>
-                          <line
-                            x1={labelX}
-                            x2={labelX}
-                            y1="28"
-                            y2="326"
-                            className="dependency-layer-line"
-                          />
-                        </g>
-                      );
-                    })}
-                    {dependencyGraphEdges.map((edge) => {
-                      const from = dependencyGraphNodes.find((node) => node.id === edge.from);
-                      const to = dependencyGraphNodes.find((node) => node.id === edge.to);
-                      if (!from || !to) return null;
-                      const isActive = activeDependencyNodeId === edge.from || activeDependencyNodeId === edge.to;
-
-                      return (
-                        <path
-                          key={`${edge.from}-${edge.to}`}
-                          className={`dependency-edge ${isActive ? 'is-active' : ''}`}
-                          markerEnd="url(#dependency-arrow)"
-                          d={`M ${from.x + 34} ${from.y} C ${(from.x + to.x) / 2} ${from.y}, ${(from.x + to.x) / 2} ${to.y}, ${to.x - 34} ${to.y}`}
-                        />
-                      );
-                    })}
-                    {dependencyGraphNodes.map((node) => {
-                      const isConnected =
-                        activeDependencyTask?.id === node.id ||
-                        activeDependencyTask?.blocked_by.includes(node.id) ||
-                        activeDependencyTask?.blocks.includes(node.id);
-                      return (
-                        <g
-                          key={node.id}
-                          className={`dependency-node is-${node.priority} ${selectedTaskId === node.id ? 'is-selected' : ''} ${hoveredDependencyNodeId === node.id ? 'is-hovered' : ''} ${isConnected ? 'is-connected' : ''}`}
-                          transform={`translate(${node.x}, ${node.y})`}
-                          onMouseEnter={() => setHoveredDependencyNodeId(node.id)}
-                          onMouseLeave={() => setHoveredDependencyNodeId((current) => (current === node.id ? null : current))}
-                          onClick={() => {
-                            setWorkspaceMode('overview');
-                            startTransition(() => setSelectedTaskId(node.id));
-                          }}
-                        >
-                          <rect x="-34" y="-24" width="68" height="48" rx="18" />
-                          <text textAnchor="middle" y="-5">#{node.id}</text>
-                          <text textAnchor="middle" y="9" className="dependency-node-title">
-                            {node.title.length > 16 ? `${node.title.slice(0, 16)}…` : node.title}
-                          </text>
-                          <text textAnchor="middle" y="22" className="dependency-node-subtext">
-                            {node.blocks.length} out • {node.blockedBy.length} in
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </svg>
-                  <div className="dependency-spotlight">
-                    {activeDependencyTask ? (
-                      <>
-                        <div className="dependency-spotlight-head">
-                          <div>
-                            <p className="eyebrow">Focused task</p>
-                            <h4>#{activeDependencyTask.id} {activeDependencyTask.title}</h4>
-                          </div>
-                          <span className={`priority-chip is-${activeDependencyTask.priority}`}>
-                            {priorityLabel(activeDependencyTask.priority)}
-                          </span>
-                        </div>
-                        <p className="dependency-spotlight-copy">
-                          {stripMarkdown(activeDependencyTask.description) || 'No description yet.'}
-                        </p>
-                        <div className="dependency-spotlight-meta">
-                          <DetailStat label="Epic" value={activeDependencyTask.epic_title || 'No epic'} />
-                          <DetailStat label="Status" value={activeDependencyTask.status} />
-                          <DetailStat
-                            label="Due"
-                            value={activeDependencyTask.due_date ? formatDate(activeDependencyTask.due_date) : 'Unset'}
-                          />
-                        </div>
-                        <div className="dependency-link-columns">
-                          <MiniPanel
-                            title="Blocked by"
-                            emptyMessage="No blockers in scope."
-                            items={(activeDependencyLinks?.blockedBy ?? []).slice(0, 4).map((task) => ({
-                              label: `#${task.id} ${task.title}`,
-                              meta: task.status,
-                              onClick: () => setHoveredDependencyNodeId(task.id),
-                            }))}
-                          />
-                          <MiniPanel
-                            title="Blocking"
-                            emptyMessage="Not blocking other tasks in scope."
-                            items={(activeDependencyLinks?.blocks ?? []).slice(0, 4).map((task) => ({
-                              label: `#${task.id} ${task.title}`,
-                              meta: task.status,
-                              onClick: () => setHoveredDependencyNodeId(task.id),
-                            }))}
-                          />
-                        </div>
-                      </>
-                    ) : (
-                      <div className="muted-panel">Hover or select a node to inspect its dependency context.</div>
-                    )}
-                  </div>
-                </div>
-              )}
+              <DependencyGraph
+                nodes={dependencyGraphNodes}
+                edges={dependencyGraphEdges}
+                graphLayers={graphLayers}
+                columnGap={columnGap}
+                activeNodeId={activeDependencyNodeId}
+                activeTask={activeDependencyTask}
+                activeLinks={activeDependencyLinks}
+                selectedTaskId={selectedTaskId}
+                hoveredNodeId={hoveredDependencyNodeId}
+                setHoveredNodeId={setHoveredDependencyNodeId}
+                onSelectNode={(id) => {
+                  setWorkspaceMode('overview');
+                  startTransition(() => setSelectedTaskId(id));
+                }}
+              />
             </div>
             {dependencyGraphNodes.length > 0 ? (
               <div className="dependency-caption">
@@ -2234,7 +2352,557 @@ function App() {
           </div>
         </div>
       ) : null}
+      {editingTask ? (
+        <TaskEditModal
+          task={editingTask}
+          epics={epics}
+          assignees={assignees}
+          saving={updateTaskMutation.isPending}
+          onClose={() => setEditingTaskId(null)}
+          onSave={async (updates) => {
+            await updateTaskMutation.mutateAsync({ id: editingTask.id, updates });
+            setEditingTaskId(null);
+          }}
+        />
+      ) : null}
     </>
+  );
+}
+
+function TaskRow({
+  task,
+  selected,
+  onSelect,
+  onEdit,
+  compact = false,
+}: {
+  task: Task;
+  selected: boolean;
+  onSelect: (id: number) => void;
+  onEdit: (id: number) => void;
+  compact?: boolean;
+}) {
+  const due = dueState(task);
+  const tag = firstTag(task.tags);
+
+  return (
+    <button
+      type="button"
+      className={`task-row ${taskTone(task.priority)} ${selected ? 'is-selected' : ''} ${compact ? 'is-compact' : ''}`}
+      onClick={() => onSelect(task.id)}
+      onDoubleClick={() => onEdit(task.id)}
+    >
+      <div className="task-row-main">
+        <div className="task-row-titleline">
+          <span className={`priority-pill is-${task.priority}`}>
+            <span className="priority-pill-dot" />
+            {priorityLabel(task.priority)}
+          </span>
+          <strong>{task.title}</strong>
+          {compact ? null : (
+            <span className={`status-pill ${task.status === 'closed' ? 'is-closed' : task.status === 'in_progress' ? 'is-in-progress' : 'is-open'}`}>
+              {statusLabel(task.status)}
+            </span>
+          )}
+        </div>
+
+        <div className="task-row-meta">
+          <span>{task.epic_title || 'No epic'}</span>
+          <span>{task.assignee_name || 'Unassigned'}</span>
+          {tag ? <span>#{tag}</span> : null}
+          {task.blocked_by.length > 0 ? <span>Blocked by {task.blocked_by.length}</span> : null}
+          {task.blocks.length > 0 ? <span>Blocks {task.blocks.length}</span> : null}
+        </div>
+
+        {compact ? null : (
+          <p className="task-card-preview">
+            {stripMarkdown(task.description) || 'No description yet.'}
+          </p>
+        )}
+      </div>
+
+      <div className="task-row-side">
+        <span className="task-row-id">#{task.id}</span>
+        {due ? <span className={`due-pill ${due.tone}`}>{due.label}</span> : null}
+        {compact ? null : <span className="task-row-updated">{formatDate(task.updated_at)}</span>}
+      </div>
+    </button>
+  );
+}
+
+const KANBAN_COLUMNS: { key: string; label: string }[] = [
+  { key: 'open', label: 'Open' },
+  { key: 'in_progress', label: 'In progress' },
+  { key: 'blocked', label: 'Blocked' },
+  { key: 'closed', label: 'Closed' },
+];
+
+function kanbanColumnOf(task: Task): string {
+  if (task.status === 'closed') {
+    return 'closed';
+  }
+  // Blocked takes precedence over open/in_progress to surface blockers.
+  if (task.blocked_by.length > 0) {
+    return 'blocked';
+  }
+  return task.status; // 'open' | 'in_progress'
+}
+
+function KanbanBoard({
+  tasks,
+  selectedTaskId,
+  onSelect,
+  onEdit,
+}: {
+  tasks: Task[];
+  selectedTaskId: number | null;
+  onSelect: (id: number) => void;
+  onEdit: (id: number) => void;
+}) {
+  const grouped = new Map<string, Task[]>(KANBAN_COLUMNS.map((col) => [col.key, []]));
+  for (const task of tasks) {
+    grouped.get(kanbanColumnOf(task))?.push(task);
+  }
+
+  return (
+    <div className="kanban-grid">
+      {KANBAN_COLUMNS.map((col) => {
+        const items = grouped.get(col.key) ?? [];
+        return (
+          <div key={col.key} className={`kanban-column kanban-column-${col.key}`}>
+            <div className="kanban-column-head">
+              <span>{col.label}</span>
+              <span className="kanban-column-count">{items.length}</span>
+            </div>
+            <div className="kanban-column-body">
+              {items.length === 0 ? (
+                <p className="kanban-column-empty">Nothing here.</p>
+              ) : (
+                items.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    selected={selectedTaskId === task.id}
+                    onSelect={onSelect}
+                    onEdit={onEdit}
+                    compact
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const SLATE_STATUS_ORDER: Status[] = ['open', 'in_progress', 'closed'];
+
+function EpicSlate({
+  tasks,
+  epics,
+  selectedTaskId,
+  onSelect,
+  onEdit,
+}: {
+  tasks: Task[];
+  epics: Epic[];
+  selectedTaskId: number | null;
+  onSelect: (id: number) => void;
+  onEdit: (id: number) => void;
+}) {
+  // Group tasks by epic_id; -1 bucket = "No epic".
+  const byEpic = new Map<number, Task[]>();
+  for (const task of tasks) {
+    const key = task.epic_id ?? -1;
+    const bucket = byEpic.get(key);
+    if (bucket) {
+      bucket.push(task);
+    } else {
+      byEpic.set(key, [task]);
+    }
+  }
+
+  const lanes: { id: number; title: string; tasks: Task[] }[] = [];
+  for (const epic of epics) {
+    const laneTasks = byEpic.get(epic.id);
+    if (laneTasks && laneTasks.length > 0) {
+      lanes.push({ id: epic.id, title: epic.title, tasks: laneTasks });
+    }
+  }
+  const orphanTasks = byEpic.get(-1);
+  if (orphanTasks && orphanTasks.length > 0) {
+    lanes.push({ id: -1, title: 'No epic', tasks: orphanTasks });
+  }
+
+  if (lanes.length === 0) {
+    return (
+      <div className="empty-state">
+        <Layers3 size={20} />
+        <span>No tasks to lay out.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="slate-grid">
+      {lanes.map((lane) => {
+        const total = lane.tasks.length;
+        const done = lane.tasks.filter((task) => task.status === 'closed').length;
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const sorted = [...lane.tasks].sort(
+          (a, b) => SLATE_STATUS_ORDER.indexOf(a.status) - SLATE_STATUS_ORDER.indexOf(b.status)
+        );
+
+        return (
+          <div key={lane.id} className="slate-lane">
+            <div className="slate-lane-head">
+              <div className="slate-lane-title">
+                <strong>{lane.title}</strong>
+                <span>{done}/{total} closed</span>
+              </div>
+              <div className="slate-lane-track">
+                <div className="slate-lane-fill" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+            <div className="slate-lane-chips">
+              {sorted.map((task) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  className={`slate-chip is-${task.status === 'closed' ? 'closed' : task.status === 'in_progress' ? 'in-progress' : 'open'} ${selectedTaskId === task.id ? 'is-selected' : ''}`}
+                  onClick={() => onSelect(task.id)}
+                  onDoubleClick={() => onEdit(task.id)}
+                  title={task.title}
+                >
+                  <span className={`priority-pill-dot is-${task.priority}`} />
+                  <span className="slate-chip-id">#{task.id}</span>
+                  <span className="slate-chip-title">{task.title}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TaskEditModal({
+  task,
+  epics,
+  assignees,
+  saving,
+  onClose,
+  onSave,
+}: {
+  task: Task;
+  epics: Epic[];
+  assignees: Assignee[];
+  saving: boolean;
+  onClose: () => void;
+  onSave: (updates: TaskUpdateInput) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    title: task.title,
+    description: task.description ?? '',
+    status: task.status,
+    priority: task.priority,
+    epicId: task.epic_id != null ? String(task.epic_id) : '',
+    assigneeId: task.assignee_id != null ? String(task.assignee_id) : '',
+    dueDate: task.due_date ?? '',
+    tags: task.tags ?? '',
+  });
+
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!draft.title.trim()) return;
+    onSave({
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      status: draft.status,
+      priority: draft.priority,
+      epic_id: draft.epicId ? Number(draft.epicId) : null,
+      assignee_id: draft.assigneeId ? Number(draft.assigneeId) : null,
+      due_date: draft.dueDate || null,
+      tags: draft.tags.trim() || null,
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Edit task #${task.id}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-head modal-head">
+          <div>
+            <p className="eyebrow">Edit task</p>
+            <h3>#{task.id}</h3>
+          </div>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            <X size={16} />
+            <span>Close</span>
+          </button>
+        </div>
+
+        <form className="composer-grid modal-composer-grid" onSubmit={submit}>
+          <label className="field field-span-2">
+            <span>Title</span>
+            <input
+              autoFocus
+              value={draft.title}
+              onChange={(event) => setDraft((d) => ({ ...d, title: event.target.value }))}
+            />
+          </label>
+          <label className="field field-span-2">
+            <span>Description</span>
+            <textarea
+              value={draft.description}
+              onChange={(event) => setDraft((d) => ({ ...d, description: event.target.value }))}
+              rows={5}
+            />
+          </label>
+          <label className="field">
+            <span>Status</span>
+            <select
+              value={draft.status}
+              onChange={(event) => setDraft((d) => ({ ...d, status: event.target.value as Status }))}
+            >
+              <option value="open">Open</option>
+              <option value="in_progress">In Progress</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Priority</span>
+            <select
+              value={draft.priority}
+              onChange={(event) => setDraft((d) => ({ ...d, priority: event.target.value as Priority }))}
+            >
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Epic</span>
+            <select
+              value={draft.epicId}
+              onChange={(event) => setDraft((d) => ({ ...d, epicId: event.target.value }))}
+            >
+              <option value="">No epic</option>
+              {epics.map((epic) => (
+                <option key={epic.id} value={String(epic.id)}>
+                  #{epic.id} {epic.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Assignee</span>
+            <select
+              value={draft.assigneeId}
+              onChange={(event) => setDraft((d) => ({ ...d, assigneeId: event.target.value }))}
+            >
+              <option value="">Unassigned</option>
+              {assignees.map((assignee) => (
+                <option key={assignee.id} value={String(assignee.id)}>
+                  {assignee.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Due date</span>
+            <input
+              type="date"
+              value={draft.dueDate}
+              onChange={(event) => setDraft((d) => ({ ...d, dueDate: event.target.value }))}
+            />
+          </label>
+          <label className="field field-span-2">
+            <span>Tags</span>
+            <input
+              value={draft.tags}
+              onChange={(event) => setDraft((d) => ({ ...d, tags: event.target.value }))}
+              placeholder="comma, separated, tags"
+            />
+          </label>
+          <div className="composer-actions field-span-2">
+            <button className="ghost-button" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="primary-button" type="submit" disabled={saving || !draft.title.trim()}>
+              {saving ? <Loader size={16} className="spin" /> : <CheckCheck size={16} />}
+              <span>Save changes</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function DependencyGraph({
+  nodes,
+  edges,
+  graphLayers,
+  columnGap,
+  activeNodeId,
+  activeTask,
+  activeLinks,
+  selectedTaskId,
+  hoveredNodeId,
+  setHoveredNodeId,
+  onSelectNode,
+}: {
+  nodes: DependencyGraphNode[];
+  edges: DependencyGraphEdge[];
+  graphLayers: number[];
+  columnGap: number;
+  activeNodeId: number | null;
+  activeTask: Task | null;
+  activeLinks: { blockedBy: Task[]; blocks: Task[] } | null;
+  selectedTaskId: number | null;
+  hoveredNodeId: number | null;
+  setHoveredNodeId: React.Dispatch<React.SetStateAction<number | null>>;
+  onSelectNode: (id: number) => void;
+}) {
+  if (nodes.length === 0) {
+    return <div className="muted-panel">No dependency edges to visualize yet.</div>;
+  }
+
+  return (
+    <div className="dependency-graph-layout">
+      <svg viewBox="0 0 720 340" className="dependency-graph" role="img" aria-label="Task dependency graph">
+        <defs>
+          <marker
+            id="dependency-arrow"
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(226, 230, 227, 0.6)" />
+          </marker>
+        </defs>
+        {graphLayers.map((layer, index) => {
+          const labelX = 80 + columnGap * index;
+          return (
+            <g key={layer}>
+              <text x={labelX} y="18" textAnchor="middle" className="dependency-layer-label">
+                {index === 0 ? 'Roots' : `Layer ${index + 1}`}
+              </text>
+              <line x1={labelX} x2={labelX} y1="28" y2="326" className="dependency-layer-line" />
+            </g>
+          );
+        })}
+        {edges.map((edge) => {
+          const from = nodes.find((node) => node.id === edge.from);
+          const to = nodes.find((node) => node.id === edge.to);
+          if (!from || !to) return null;
+          const isActive = activeNodeId === edge.from || activeNodeId === edge.to;
+
+          return (
+            <path
+              key={`${edge.from}-${edge.to}`}
+              className={`dependency-edge ${isActive ? 'is-active' : ''}`}
+              markerEnd="url(#dependency-arrow)"
+              d={`M ${from.x + 34} ${from.y} C ${(from.x + to.x) / 2} ${from.y}, ${(from.x + to.x) / 2} ${to.y}, ${to.x - 34} ${to.y}`}
+            />
+          );
+        })}
+        {nodes.map((node) => {
+          const isConnected =
+            activeTask?.id === node.id ||
+            activeTask?.blocked_by.includes(node.id) ||
+            activeTask?.blocks.includes(node.id);
+          return (
+            <g
+              key={node.id}
+              className={`dependency-node is-${node.priority} ${selectedTaskId === node.id ? 'is-selected' : ''} ${hoveredNodeId === node.id ? 'is-hovered' : ''} ${isConnected ? 'is-connected' : ''}`}
+              transform={`translate(${node.x}, ${node.y})`}
+              onMouseEnter={() => setHoveredNodeId(node.id)}
+              onMouseLeave={() => setHoveredNodeId((current) => (current === node.id ? null : current))}
+              onClick={() => onSelectNode(node.id)}
+            >
+              <rect x="-34" y="-24" width="68" height="48" rx="18" />
+              <text textAnchor="middle" y="-5">#{node.id}</text>
+              <text textAnchor="middle" y="9" className="dependency-node-title">
+                {node.title.length > 16 ? `${node.title.slice(0, 16)}…` : node.title}
+              </text>
+              <text textAnchor="middle" y="22" className="dependency-node-subtext">
+                {node.blocks.length} out • {node.blockedBy.length} in
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="dependency-spotlight">
+        {activeTask ? (
+          <>
+            <div className="dependency-spotlight-head">
+              <div>
+                <p className="eyebrow">Focused task</p>
+                <h4>#{activeTask.id} {activeTask.title}</h4>
+              </div>
+              <span className={`priority-chip is-${activeTask.priority}`}>
+                {priorityLabel(activeTask.priority)}
+              </span>
+            </div>
+            <p className="dependency-spotlight-copy">
+              {stripMarkdown(activeTask.description) || 'No description yet.'}
+            </p>
+            <div className="dependency-spotlight-meta">
+              <DetailStat label="Epic" value={activeTask.epic_title || 'No epic'} />
+              <DetailStat label="Status" value={statusLabel(activeTask.status)} />
+              <DetailStat
+                label="Due"
+                value={activeTask.due_date ? formatDate(activeTask.due_date) : 'Unset'}
+              />
+            </div>
+            <div className="dependency-link-columns">
+              <MiniPanel
+                title="Blocked by"
+                emptyMessage="No blockers in scope."
+                items={(activeLinks?.blockedBy ?? []).slice(0, 4).map((task) => ({
+                  label: `#${task.id} ${task.title}`,
+                  meta: statusLabel(task.status),
+                  onClick: () => setHoveredNodeId(task.id),
+                }))}
+              />
+              <MiniPanel
+                title="Blocking"
+                emptyMessage="Not blocking other tasks in scope."
+                items={(activeLinks?.blocks ?? []).slice(0, 4).map((task) => ({
+                  label: `#${task.id} ${task.title}`,
+                  meta: statusLabel(task.status),
+                  onClick: () => setHoveredNodeId(task.id),
+                }))}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="muted-panel">Hover or select a node to inspect its dependency context.</div>
+        )}
+      </div>
+    </div>
   );
 }
 
