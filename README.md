@@ -12,6 +12,10 @@ A robust, production-grade task/plan manager CLI designed for reliability, agent
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Mycelium CLI demo" width="800">
+</p>
+
 ## Features
 
 - **Single Binary**: Statically compiled, no dependencies
