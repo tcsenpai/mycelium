@@ -1,6 +1,6 @@
 [package]
 name = "mycui"
-version = "0.1.0"
+version = "0.2.0"
 description = "A native desktop dashboard for Mycelium task management"
 authors = ["Mycelium Contributors"]
 license = "MIT"

@@ -1,4 +1,8 @@
-# Mycelium 🍄
+<p align="center">
+  <img src="assets/logo.png" alt="Mycelium" width="120" height="120">
+</p>
+
+# Mycelium
 
 A robust, production-grade task/plan manager CLI designed for reliability, agent usage, and git-trackable project management.
 

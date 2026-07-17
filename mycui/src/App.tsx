@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import brandMark from './assets/brand-mark.png';
 import {
   AlertTriangle,
   ArrowRight,
@@ -31,7 +32,6 @@ import {
   Rows,
   Search,
   SlidersHorizontal,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -1397,14 +1397,14 @@ function App() {
             <PanelLeftOpen size={18} />
           </button>
           <div className="brand-mark">
-            <Sparkles size={18} />
+            <img src={brandMark} alt="Mycelium" width={28} height={28} />
           </div>
         </aside>
       ) : (
       <aside className="project-rail">
         <div className="brand-block">
           <div className="brand-mark">
-            <Sparkles size={18} />
+            <img src={brandMark} alt="Mycelium" width={28} height={28} />
           </div>
           <div>
             <p className="eyebrow">Native desktop</p>
