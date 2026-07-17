@@ -85,21 +85,19 @@ fn test_init() {
     assert!(stdout.contains("Mycelium project initialized"));
 }
 
-/// Schema-equality guard between the CLI (`myc`) migrations and mycui's
-/// `init_schema` (mycui/src-tauri/src/db.rs). The two crates own separate
-/// schema code today (follow-up #1 tracks unifying them via a shared
-/// `mycelium-core` crate). Until then, this test fails loudly the moment
-/// either side changes a shared table/column, so drift can't ship silently.
+/// Schema contract guard. Since the `mycelium-core` extraction there is a
+/// single schema (core migrations), consumed by both `myc` and MycUI. This
+/// test pins the tables + columns MycUI's frontend relies on, so a future core
+/// migration that renamed/dropped one of them would fail here loudly rather
+/// than silently breaking the desktop app.
 ///
-/// Invariant: every table + column mycui creates must exist in the CLI DB
-/// with the same declared type. The CLI may have MORE (task_notes, epic_notes,
-/// linear_sync, v5 columns) — that's expected, mycui just doesn't read them.
-///
-/// If this fails: mirror the change on both sides, or land follow-up #1.
+/// Invariant: every table + column below exists in a freshly-initialized DB
+/// with the expected declared type. Core may have MORE (task_notes, epic_notes,
+/// linear_sync, v5 columns) — MycUI simply ignores those.
 #[test]
-fn test_schema_matches_mycui_init_schema() {
-    // Canonical expectation mirrored from mycui/src-tauri/src/db.rs::init_schema.
-    // (table, [(column, declared_type)]). Keep in lockstep with that file.
+fn test_mycui_required_schema_present() {
+    // Tables + columns the MycUI frontend reads (see mycui dto.rs / types.ts).
+    // (table, [(column, declared_type)]).
     let expected: &[(&str, &[(&str, &str)])] = &[
         (
             "epics",

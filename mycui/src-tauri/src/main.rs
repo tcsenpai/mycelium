@@ -266,8 +266,10 @@ fn build_task_dtos(db: &Database, tasks: Vec<mycelium_core::models::Task>) -> Re
         assignees.into_iter().map(|a| (a.id, a.name)).collect();
 
     let ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
+    // blocked_by must only reflect OPEN/IN_PROGRESS blockers (a task blocked
+    // solely by a closed task is not blocked). Use the status-filtered variant.
     let deps = db
-        .get_dependencies_for_tasks(&ids)
+        .get_active_dependencies_for_tasks(&ids)
         .map_err(|e| e.to_string())?;
 
     let dtos = tasks
@@ -298,13 +300,18 @@ fn build_task_dto(db: &Database, task: mycelium_core::models::Task) -> Result<Ta
             .map(|a| a.name),
         None => None,
     };
-    let deps = db.get_all_dependencies(task.id).map_err(|e| e.to_string())?;
+    // Same active-blocker semantics as the batch path: blocked_by counts only
+    // open/in_progress blockers; blocks is the unfiltered reverse edge.
+    let deps = db
+        .get_active_dependencies_for_tasks(&[task.id])
+        .map_err(|e| e.to_string())?;
+    let (blocked_by, blocks) = deps.get(&task.id).cloned().unwrap_or_default();
     Ok(dto::task_from_core(
         task,
         epic_title,
         assignee_name,
-        deps.blocked_by,
-        deps.blocks,
+        blocked_by,
+        blocks,
     ))
 }
 
@@ -325,19 +332,28 @@ async fn get_tasks(
     let core_status: Option<mycelium_core::models::Status> = filters.status.map(Into::into);
     let core_priority: Option<mycelium_core::models::Priority> = filters.priority.map(Into::into);
 
+    // Note: we do NOT pass `blocked` to core list_tasks. Core's blocked filter
+    // keys on OPEN-only blockers, but MycUI considers a task blocked if it has
+    // any OPEN or IN_PROGRESS blocker. So we fetch unfiltered and apply the
+    // blocked filter in the DTO layer, where blocked_by already has the correct
+    // (open+in_progress) semantics.
     let tasks = db
         .list_tasks(
             filters.epic_id,
             core_status,
             core_priority,
             filters.assignee_id,
-            filters.blocked,
+            false,
             filters.overdue,
             filters.tag.as_deref(),
         )
         .map_err(|e| e.to_string())?;
 
     let mut dtos = build_task_dtos(&db, tasks)?;
+
+    if filters.blocked {
+        dtos.retain(|t| !t.blocked_by.is_empty());
+    }
 
     if let Some(search) = filters.search {
         let search_lower = search.to_lowercase();

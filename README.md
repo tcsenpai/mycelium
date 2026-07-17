@@ -92,13 +92,12 @@ released on their own cadence. The CLI is published to crates.io as
 `mycelium-manager`; MycUI ships as a desktop bundle attached to GitHub
 Releases. There is no requirement to run matching version numbers.
 
-They stay compatible because both read the same on-disk SQLite database in
-`.mycelium/mycelium.db` and apply the same schema, which is guarded by a
-schema-equality test in CI. You can run any released CLI alongside any
-released MycUI against the same project, use either tool on its own, or mix
-them freely. Neither depends on the other at runtime: the CLI is a standalone
-binary, and MycUI talks to the database directly rather than shelling out to
-`myc`.
+They stay compatible because both are built on the same `mycelium-core` crate,
+so they share one schema, one set of migrations, and one data layer. You can
+run any released CLI alongside any released MycUI against the same project, use
+either tool on its own, or mix them freely. Neither depends on the other at
+runtime: the CLI is a standalone binary, and MycUI talks to the database
+directly through core rather than shelling out to `myc`.
 
 ## Quick Start
 
@@ -397,6 +396,7 @@ bun run tauri:dev
 ## Architecture
 
 - **Rust** - Type-safe, performant, single binary
+- **mycelium-core** - Shared crate (db, models, migrations, errors) consumed by both the CLI and MycUI, so they use one schema and data layer
 - **SQLite** - Embedded, git-trackable, ACID-compliant
 - **Clap** - Command-line parsing with derive macros
 - **Rusqlite** - SQLite bindings with bundled lib

@@ -133,6 +133,93 @@ fn followup_status_serde_matches_db_string() {
 }
 
 #[test]
+fn active_dependencies_exclude_closed_blockers() {
+    // Regression: a task blocked only by a CLOSED task must NOT report as
+    // blocked. get_active_dependencies_for_tasks filters blocked_by to
+    // open/in_progress blockers; blocks (reverse edge) stays unfiltered.
+    let mut db = db();
+    let a = db
+        .create_task(
+            "A",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let b = db
+        .create_task(
+            "B",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    // B blocks A (A depends on B).
+    db.add_dependency(a.id, b.id).unwrap();
+
+    // While B is open, A is blocked by B.
+    let deps = db.get_active_dependencies_for_tasks(&[a.id, b.id]).unwrap();
+    assert_eq!(deps[&a.id].0, vec![b.id], "A blocked_by B while B open");
+    assert_eq!(deps[&b.id].1, vec![a.id], "B blocks A");
+
+    // An IN_PROGRESS blocker still counts as blocking (open+in_progress, not open-only).
+    db.update_task(
+        b.id,
+        None,
+        None,
+        Some(Status::InProgress),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let deps = db.get_active_dependencies_for_tasks(&[a.id, b.id]).unwrap();
+    assert_eq!(
+        deps[&a.id].0,
+        vec![b.id],
+        "A still blocked while B in_progress"
+    );
+
+    // Close B: A must no longer be reported as blocked.
+    // update_task(id, title, description, status, priority, epic_id, assignee_id,
+    //             due_date, tags, notes, user_info, agent_questions)
+    db.update_task(
+        b.id,
+        None,
+        None,
+        Some(Status::Closed),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let deps = db.get_active_dependencies_for_tasks(&[a.id, b.id]).unwrap();
+    assert!(deps[&a.id].0.is_empty(), "A not blocked once B is closed");
+    // Reverse edge still records the (now-closed) relationship.
+    assert_eq!(deps[&b.id].1, vec![a.id], "blocks edge unfiltered");
+}
+
+#[test]
 fn priority_serde_roundtrip() {
     for (p, s) in [
         (Priority::Low, "\"low\""),

@@ -57,9 +57,10 @@ pub enum MyceliumError {
 
 pub type Result<T> = std::result::Result<T, MyceliumError>;
 
-/// Serialize errors as `{ "error": "<display message>" }` so GUI consumers
-/// (Tauri commands) can return them to a frontend. The rich variants collapse
-/// to their Display string, which is all a frontend needs.
+/// Serialize errors as `{ "error": "<display message>" }`. Available for
+/// consumers that return the error type directly over a serde boundary. (The
+/// current MycUI Tauri commands map errors to a plain string via `to_string()`,
+/// so they do not use this impl, but it keeps the type usable as a serde error.)
 impl serde::Serialize for MyceliumError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where

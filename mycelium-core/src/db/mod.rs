@@ -769,6 +769,70 @@ impl Database {
         Ok(result)
     }
 
+    /// Like `get_dependencies_for_tasks`, but the `blocked_by` set only includes
+    /// blockers that are still OPEN or IN_PROGRESS. A task whose only blocker is
+    /// closed is therefore not reported as blocked. `blocks` (the reverse edge)
+    /// is unfiltered. Mirrors the semantics GUI/consumers expect for a live
+    /// "blocked" state.
+    pub fn get_active_dependencies_for_tasks(
+        &self,
+        task_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, (Vec<i64>, Vec<i64>)>> {
+        use std::collections::HashMap;
+
+        if task_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let placeholders = task_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+
+        // blocked_by: only blockers whose status is open/in_progress.
+        let sql = format!(
+            "SELECT d.task_id, d.depends_on_task_id, t.status
+             FROM dependencies d
+             JOIN tasks t ON t.id = d.depends_on_task_id
+             WHERE d.task_id IN ({ph}) OR d.depends_on_task_id IN ({ph})",
+            ph = placeholders
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = task_ids
+            .iter()
+            .chain(task_ids.iter())
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+
+        let mut result: HashMap<i64, (Vec<i64>, Vec<i64>)> = HashMap::new();
+        for &id in task_ids {
+            result.insert(id, (vec![], vec![]));
+        }
+
+        let rows = stmt.query_map(&*params, |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+
+        for row in rows {
+            let (task_id, depends_on_id, blocker_status) = row?;
+            let blocker_active = blocker_status == "open" || blocker_status == "in_progress";
+
+            // task_id is blocked by depends_on_id — only when the blocker is active.
+            if blocker_active && task_ids.contains(&task_id) {
+                result.entry(task_id).or_default().0.push(depends_on_id);
+            }
+
+            // depends_on_id blocks task_id (reverse edge, unfiltered).
+            if task_ids.contains(&depends_on_id) {
+                result.entry(depends_on_id).or_default().1.push(task_id);
+            }
+        }
+
+        Ok(result)
+    }
+
     // Task note operations
     pub fn add_task_note(&mut self, task_id: i64, content: &str) -> Result<TaskNote> {
         let now = chrono::Local::now().to_rfc3339();
@@ -1391,6 +1455,9 @@ impl Database {
 
     pub fn create_followup(&mut self, body: &str, title: Option<&str>) -> Result<Followup> {
         let now = chrono::Local::now().to_rfc3339();
+        // Normalize the title: trim and treat whitespace-only as absent, so a
+        // blank title never leaks to consumers.
+        let title = title.map(str::trim).filter(|s| !s.is_empty());
         self.conn.execute(
             "INSERT INTO followups (body, title, status, created_at) VALUES (?1, ?2, 'open', ?3)",
             (body, title, &now),
