@@ -104,9 +104,11 @@ export const followupStatusLabels: Record<FollowupStatus, string> = {
   wontfix: 'Won’t Fix',
 };
 
+// Map to hand-written CSS modifier classes (see .status-pill.is-* in index.css).
+// NOT Tailwind — this project has no Tailwind; class names must match real CSS.
 export const followupStatusColors: Record<FollowupStatus, string> = {
-  open: 'bg-blue-500',
-  in_progress: 'bg-amber-500',
-  done: 'bg-emerald-500',
-  wontfix: 'bg-zinc-500',
+  open: 'is-open',
+  in_progress: 'is-in-progress',
+  done: 'is-done',
+  wontfix: 'is-wontfix',
 };

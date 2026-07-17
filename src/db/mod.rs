@@ -48,6 +48,13 @@ impl Database {
         conn.execute_batch("PRAGMA foreign_keys = ON")?;
         conn.execute_batch("PRAGMA journal_mode = WAL")?;
         conn.execute_batch("PRAGMA synchronous = NORMAL")?;
+        // Each `myc` invocation opens its own connection. Under WAL, SQLite still
+        // serializes writers with a single write lock; a second writer that
+        // arrives while the lock is held gets SQLITE_BUSY *immediately* unless a
+        // busy timeout is set. Without this, rapid/concurrent `task create`
+        // invocations (and the per-startup ensure_schema DDL) can fail or drop
+        // writes. 5s is ample for a local CLI.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
         let mut db = Self { conn };
         db.migrate()?;

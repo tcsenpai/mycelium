@@ -42,13 +42,30 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     // migration whose number was already recorded on a *different* branch
     // (e.g. branch A's v6 = embeddings, branch B's v6 = followups: switching
     // A→B leaves _migrations at 6 so B's v6 never runs, and its table is
-    // missing). Re-asserting every table/index/column idempotently after the
-    // gate repairs that mismatch without a migration-ID rewrite.
+    // missing). Re-asserting every table/index/column idempotently repairs that
+    // mismatch without a migration-ID rewrite.
+    //
+    // Guard on a sentinel table so the healthy path issues ZERO writes on
+    // startup — re-running DDL on every open added write contention under
+    // concurrent CLI invocations. We only re-assert when something is actually
+    // missing (the branch-switch repair case).
     // ponytail: idempotent DDL re-assert, upgrade to checksum-tracked
     // migrations if per-branch column drift ever appears.
-    ensure_schema(conn)?;
+    if !table_exists(conn, "followups")? {
+        ensure_schema(conn)?;
+    }
 
     Ok(())
+}
+
+/// Whether a table exists (used to gate the schema re-assert).
+fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+        [name],
+        |row| row.get(0),
+    )?;
+    Ok(exists)
 }
 
 /// Column names present on a table, via PRAGMA table_info.

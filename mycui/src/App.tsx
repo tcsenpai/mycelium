@@ -456,6 +456,9 @@ function App() {
   const [filtersOpen, setFiltersOpen] = useState(() => readPersistedBool('mycui-filters-open', false));
   const [recentOpen, setRecentOpen] = useState(() => readPersistedBool('mycui-recent-open', false));
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [undoToast, setUndoToast] = useState<{ message: string; taskId: number; revert: TaskUpdateInput } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [statusFilters, setStatusFilters] = useState<Set<StatusFilter>>(new Set());
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
@@ -718,6 +721,10 @@ function App() {
         setRailCollapsed((current) => !current);
       } else if (event.key === ']') {
         setDetailCollapsed((current) => !current);
+      } else if (event.key === '?') {
+        setShortcutsOpen((current) => !current);
+      } else if (event.key === 'Escape') {
+        setShortcutsOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -1124,6 +1131,9 @@ function App() {
     { label: 'Open overdue', value: String(overdueOpenCount), meta: 'needs intervention' },
   ];
   const taskMap = new Map(tasks.map((task) => [task.id, task]));
+  const dependencyLinkedCount = tasks.filter(
+    (task) => task.blocked_by.length > 0 || task.blocks.length > 0
+  ).length;
   const dependencyCandidates = tasks
     .filter((task) => task.blocked_by.length > 0 || task.blocks.length > 0)
     .sort((left, right) => {
@@ -1263,7 +1273,56 @@ function App() {
   }
 
   function handleTaskFieldChange(taskId: number, updates: TaskUpdateInput) {
+    // Capture prior values of the fields being changed so the toast can revert.
+    const prior = tasks.find((task) => task.id === taskId);
+    if (prior) {
+      const revert: TaskUpdateInput = {};
+      const summaries: string[] = [];
+      for (const key of Object.keys(updates) as (keyof TaskUpdateInput)[]) {
+        // Map task snapshot value back into an update payload shape.
+        switch (key) {
+          case 'status':
+            revert.status = prior.status;
+            summaries.push(`status → ${statusLabel(updates.status as Status)}`);
+            break;
+          case 'priority':
+            revert.priority = prior.priority;
+            summaries.push(`priority → ${priorityLabel(updates.priority as Priority)}`);
+            break;
+          case 'epic_id':
+            revert.epic_id = prior.epic_id ?? null;
+            summaries.push('epic changed');
+            break;
+          case 'assignee_id':
+            revert.assignee_id = prior.assignee_id ?? null;
+            summaries.push('assignee changed');
+            break;
+          case 'due_date':
+            revert.due_date = prior.due_date ?? null;
+            summaries.push('due date changed');
+            break;
+          default:
+            break;
+        }
+      }
+      if (Object.keys(revert).length > 0) {
+        if (undoTimerRef.current) {
+          clearTimeout(undoTimerRef.current);
+        }
+        setUndoToast({ message: `#${taskId}: ${summaries.join(', ')}`, taskId, revert });
+        undoTimerRef.current = setTimeout(() => setUndoToast(null), 6000);
+      }
+    }
     updateTaskMutation.mutate({ id: taskId, updates });
+  }
+
+  function handleUndo() {
+    if (!undoToast) return;
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+    }
+    updateTaskMutation.mutate({ id: undoToast.taskId, updates: undoToast.revert });
+    setUndoToast(null);
   }
 
   function handleDetailDraftChange<K extends keyof DetailDraft>(key: K, value: DetailDraft[K]) {
@@ -1414,7 +1473,7 @@ function App() {
                     onClick={() => setSelectedEpicId((current) => (current === epic.id ? null : epic.id))}
                   >
                     <div>
-                      <strong>{epic.title}</strong>
+                      <strong><span className="epic-num">#{epic.id}</span> {epic.title}</strong>
                       <span>{epic.is_done ? 'Complete' : `${epic.open_tasks} open`}</span>
                     </div>
                     <em>{progress}%</em>
@@ -1469,10 +1528,11 @@ function App() {
 
       <main className="workspace">
         <header className="workspace-hero">
-          <div className="view-switch">
+          <nav className="view-switch" aria-label="Main views">
             <button
               className={`view-switch-button ${workspaceMode === 'overview' ? 'is-active' : ''}`}
               type="button"
+              aria-current={workspaceMode === 'overview' ? 'page' : undefined}
               onClick={() => setWorkspaceMode('overview')}
             >
               <Layers3 size={16} />
@@ -1481,6 +1541,7 @@ function App() {
             <button
               className={`view-switch-button ${workspaceMode === 'analytics' ? 'is-active' : ''}`}
               type="button"
+              aria-current={workspaceMode === 'analytics' ? 'page' : undefined}
               onClick={() => setWorkspaceMode('analytics')}
             >
               <BarChart3 size={16} />
@@ -1489,12 +1550,13 @@ function App() {
             <button
               className={`view-switch-button ${workspaceMode === 'followups' ? 'is-active' : ''}`}
               type="button"
+              aria-current={workspaceMode === 'followups' ? 'page' : undefined}
               onClick={() => setWorkspaceMode('followups')}
             >
               <Pin size={16} />
               <span>Follow-ups</span>
             </button>
-          </div>
+          </nav>
 
           <div className="hero-actions">
             <label className="search-field">
@@ -1522,9 +1584,34 @@ function App() {
         </section>
 
         {errorMessage ? (
-          <div className="banner error-banner">
+          <div className="banner error-banner" role="alert">
             <AlertTriangle size={16} />
-            <span>{errorMessage}</span>
+            <div className="error-banner-body">
+              <strong>Something went wrong</strong>
+              <span>{errorMessage}</span>
+            </div>
+            <div className="error-banner-actions">
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                  setErrorMessage(null);
+                  queryClient.invalidateQueries();
+                }}
+              >
+                <Loader size={14} />
+                <span>Retry</span>
+              </button>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                aria-label="Dismiss error"
+                title="Dismiss"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
         ) : null}
 
@@ -1542,10 +1629,11 @@ function App() {
                   <h3>Tasks in motion</h3>
                 </div>
                 <div className="panel-head-tools">
-                  <div className="view-switch layout-switch">
+                  <div className="view-switch layout-switch" role="group" aria-label="Board layout">
                     <button
                       className={`view-switch-button ${boardLayout === 'kanban' ? 'is-active' : ''}`}
                       type="button"
+                      aria-pressed={boardLayout === 'kanban'}
                       onClick={() => setBoardLayout('kanban')}
                       title="Kanban board"
                     >
@@ -1555,6 +1643,7 @@ function App() {
                     <button
                       className={`view-switch-button ${boardLayout === 'slate' ? 'is-active' : ''}`}
                       type="button"
+                      aria-pressed={boardLayout === 'slate'}
                       onClick={() => setBoardLayout('slate')}
                       title="Epic slate"
                     >
@@ -1564,6 +1653,7 @@ function App() {
                     <button
                       className={`view-switch-button ${boardLayout === 'dag' ? 'is-active' : ''}`}
                       type="button"
+                      aria-pressed={boardLayout === 'dag'}
                       onClick={() => setBoardLayout('dag')}
                       title="Dependency graph"
                     >
@@ -1576,36 +1666,27 @@ function App() {
                     <span>{visibleTasks.length}</span>
                   </div>
                   <button
-                    className={`icon-button ${filtersOpen ? 'is-active' : ''}`}
+                    className={`icon-button ${filtersOpen ? 'is-active' : ''} ${activeFilterCount > 0 ? 'has-badge' : ''}`}
                     type="button"
                     onClick={() => setFiltersOpen((current) => !current)}
-                    title="Toggle filters"
-                    aria-label="Toggle filters"
+                    title={activeFilterCount > 0 ? `Filters (${activeFilterCount} active)` : 'Toggle filters'}
+                    aria-label={activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : 'Toggle filters'}
                     aria-expanded={filtersOpen}
+                    aria-pressed={filtersOpen}
+                    data-badge={activeFilterCount > 0 ? activeFilterCount : undefined}
                   >
                     <SlidersHorizontal size={16} />
                   </button>
-                  {detailCollapsed ? (
-                    <button
-                      className="icon-button"
-                      type="button"
-                      onClick={() => setDetailCollapsed(false)}
-                      title="Show detail panel (])"
-                      aria-label="Show detail panel"
-                    >
-                      <PanelRightOpen size={16} />
-                    </button>
-                  ) : (
-                    <button
-                      className="icon-button"
-                      type="button"
-                      onClick={() => setDetailCollapsed(true)}
-                      title="Hide detail panel (])"
-                      aria-label="Hide detail panel"
-                    >
-                      <PanelRightClose size={16} />
-                    </button>
-                  )}
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => setDetailCollapsed((current) => !current)}
+                    title={detailCollapsed ? 'Show detail panel (])' : 'Hide detail panel (])'}
+                    aria-label={detailCollapsed ? 'Show detail panel' : 'Hide detail panel'}
+                    aria-pressed={!detailCollapsed}
+                  >
+                    {detailCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+                  </button>
                 </div>
               </div>
 
@@ -1628,6 +1709,15 @@ function App() {
                       {label}
                     </button>
                   ))}
+                  <label className="inline-sort" title="Sort tasks">
+                    <span className="sr-only">Sort by</span>
+                    <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
+                      <option value="priority">Sort: Priority</option>
+                      <option value="due">Sort: Due date</option>
+                      <option value="updated">Sort: Updated</option>
+                      <option value="title">Sort: Title</option>
+                    </select>
+                  </label>
                 </div>
 
                 {filtersOpen ? (
@@ -1676,15 +1766,6 @@ function App() {
                       <option value="none">No due date</option>
                     </select>
                   </label>
-                  <label className="filter-select">
-                    <span>Sort</span>
-                    <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
-                      <option value="priority">Priority</option>
-                      <option value="due">Due date</option>
-                      <option value="updated">Last updated</option>
-                      <option value="title">Title</option>
-                    </select>
-                  </label>
                 </div>
                 ) : null}
 
@@ -1731,14 +1812,38 @@ function App() {
               </div>
 
               {loading ? (
-                <div className="empty-state">
-                  <Loader size={20} className="spin" />
-                  <span>Loading project data…</span>
+                <div className="task-skeleton" aria-busy="true" aria-live="polite">
+                  <span className="sr-only">Loading tasks…</span>
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <div key={index} className="skeleton-row" />
+                  ))}
                 </div>
               ) : visibleTasks.length === 0 ? (
                 <div className="empty-state">
                   <Briefcase size={20} />
-                  <span>No tasks match the current filters.</span>
+                  <span>
+                    {activeFilterCount > 0
+                      ? 'No tasks match the current filters.'
+                      : projectPath
+                        ? 'No tasks yet. Create your first task to get started.'
+                        : 'Open a project folder to begin.'}
+                  </span>
+                  {activeFilterCount > 0 ? (
+                    <button className="ghost-button" type="button" onClick={resetQueueFilters}>
+                      <X size={14} />
+                      <span>Clear {activeFilterCount} filter{activeFilterCount === 1 ? '' : 's'}</span>
+                    </button>
+                  ) : projectPath ? (
+                    <button className="primary-button" type="button" onClick={() => setComposerOpen(true)}>
+                      <Plus size={16} />
+                      <span>New task</span>
+                    </button>
+                  ) : (
+                    <button className="primary-button" type="button" onClick={handleProjectPicker}>
+                      <FolderOpen size={16} />
+                      <span>Open project</span>
+                    </button>
+                  )}
                 </div>
               ) : boardLayout === 'kanban' ? (
                 <KanbanBoard
@@ -1746,6 +1851,7 @@ function App() {
                   selectedTaskId={selectedTask?.id ?? null}
                   onSelect={(id) => startTransition(() => setSelectedTaskId(id))}
                   onEdit={(id) => setEditingTaskId(id)}
+                  onCycleStatus={(id, next) => handleTaskFieldChange(id, { status: next })}
                 />
               ) : boardLayout === 'slate' ? (
                 <EpicSlate
@@ -1770,6 +1876,14 @@ function App() {
                     setHoveredNodeId={setHoveredDependencyNodeId}
                     onSelectNode={(id) => startTransition(() => setSelectedTaskId(id))}
                   />
+                  {dependencyGraphNodes.length > 0 ? (
+                    <p className="dag-truncation-note">
+                      Showing {dependencyGraphNodes.length} of {dependencyLinkedCount} task{dependencyLinkedCount === 1 ? '' : 's'} with dependencies.
+                      {dependencyLinkedCount > dependencyGraphNodes.length
+                        ? ' Unconnected tasks appear in Kanban and Slate.'
+                        : ''}
+                    </p>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -2091,7 +2205,7 @@ function App() {
                   return (
                     <div key={epic.id} className="epic-lane">
                       <div className="epic-lane-head">
-                        <strong>{epic.title}</strong>
+                        <strong><span className="epic-num">#{epic.id}</span> {epic.title}</strong>
                         <span>{epic.open_tasks} open • {done}/{epic.total_tasks} closed</span>
                       </div>
                       <div className="epic-lane-track">
@@ -2365,8 +2479,88 @@ function App() {
           }}
         />
       ) : null}
+      {shortcutsOpen ? <ShortcutsModal onClose={() => setShortcutsOpen(false)} /> : null}
+      {undoToast ? (
+        <div className="undo-toast" role="status">
+          <span>{undoToast.message}</span>
+          <button className="undo-toast-button" type="button" onClick={handleUndo}>
+            Undo
+          </button>
+          <button
+            className="undo-toast-dismiss"
+            type="button"
+            onClick={() => setUndoToast(null)}
+            aria-label="Dismiss"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : null}
+      <button
+        className="help-fab"
+        type="button"
+        onClick={() => setShortcutsOpen(true)}
+        title="Keyboard shortcuts (?)"
+        aria-label="Show keyboard shortcuts"
+      >
+        ?
+      </button>
     </>
   );
+}
+
+function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  const shortcuts: { keys: string; action: string }[] = [
+    { keys: '[', action: 'Toggle left sidebar' },
+    { keys: ']', action: 'Toggle detail panel' },
+    { keys: '?', action: 'Show this help' },
+    { keys: 'Esc', action: 'Close dialogs' },
+    { keys: 'Click', action: 'Select a task' },
+    { keys: 'Double-click', action: 'Edit a task' },
+    { keys: 'Status pill', action: 'Click to advance status (Kanban)' },
+    { keys: 'Enter / Space', action: 'Activate the focused item' },
+  ];
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-card modal-card-narrow"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-head modal-head">
+          <div>
+            <p className="eyebrow">Help</p>
+            <h3>Shortcuts &amp; gestures</h3>
+          </div>
+          <button className="ghost-button" type="button" onClick={onClose}>
+            <X size={16} />
+            <span>Close</span>
+          </button>
+        </div>
+        <ul className="shortcut-list">
+          {shortcuts.map((s) => (
+            <li key={s.keys}>
+              <kbd>{s.keys}</kbd>
+              <span>{s.action}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// Cycle order for the in-card status control: open → in_progress → closed → open.
+function nextStatus(status: Status): Status {
+  if (status === 'open') return 'in_progress';
+  if (status === 'in_progress') return 'closed';
+  return 'open';
+}
+
+function statusPillClass(status: Status) {
+  return status === 'closed' ? 'is-closed' : status === 'in_progress' ? 'is-in-progress' : 'is-open';
 }
 
 function TaskRow({
@@ -2374,23 +2568,52 @@ function TaskRow({
   selected,
   onSelect,
   onEdit,
+  onCycleStatus,
   compact = false,
 }: {
   task: Task;
   selected: boolean;
   onSelect: (id: number) => void;
   onEdit: (id: number) => void;
+  onCycleStatus: (id: number, next: Status) => void;
   compact?: boolean;
 }) {
   const due = dueState(task);
   const tag = firstTag(task.tags);
 
-  return (
+  // Status control: keyboard-native button that advances the task's status.
+  // Nested inside the row (a div, not a button, so nesting is valid HTML).
+  const statusButton = (
     <button
       type="button"
+      className={`status-pill status-cycle ${statusPillClass(task.status)}`}
+      title={`Status: ${statusLabel(task.status)} — click to set ${statusLabel(nextStatus(task.status))}`}
+      aria-label={`Status ${statusLabel(task.status)}. Activate to set ${statusLabel(nextStatus(task.status))}.`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onCycleStatus(task.id, nextStatus(task.status));
+      }}
+    >
+      {statusLabel(task.status)}
+    </button>
+  );
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
       className={`task-row ${taskTone(task.priority)} ${selected ? 'is-selected' : ''} ${compact ? 'is-compact' : ''}`}
       onClick={() => onSelect(task.id)}
       onDoubleClick={() => onEdit(task.id)}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return; // let nested controls handle their own keys
+        if (event.key === 'Enter') {
+          onSelect(task.id);
+        } else if (event.key === ' ') {
+          event.preventDefault();
+          onSelect(task.id);
+        }
+      }}
     >
       <div className="task-row-main">
         <div className="task-row-titleline">
@@ -2399,11 +2622,7 @@ function TaskRow({
             {priorityLabel(task.priority)}
           </span>
           <strong>{task.title}</strong>
-          {compact ? null : (
-            <span className={`status-pill ${task.status === 'closed' ? 'is-closed' : task.status === 'in_progress' ? 'is-in-progress' : 'is-open'}`}>
-              {statusLabel(task.status)}
-            </span>
-          )}
+          {compact ? null : statusButton}
         </div>
 
         <div className="task-row-meta">
@@ -2423,10 +2642,11 @@ function TaskRow({
 
       <div className="task-row-side">
         <span className="task-row-id">#{task.id}</span>
+        {compact ? statusButton : null}
         {due ? <span className={`due-pill ${due.tone}`}>{due.label}</span> : null}
         {compact ? null : <span className="task-row-updated">{formatDate(task.updated_at)}</span>}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -2453,11 +2673,13 @@ function KanbanBoard({
   selectedTaskId,
   onSelect,
   onEdit,
+  onCycleStatus,
 }: {
   tasks: Task[];
   selectedTaskId: number | null;
   onSelect: (id: number) => void;
   onEdit: (id: number) => void;
+  onCycleStatus: (id: number, next: Status) => void;
 }) {
   const grouped = new Map<string, Task[]>(KANBAN_COLUMNS.map((col) => [col.key, []]));
   for (const task of tasks) {
@@ -2485,6 +2707,7 @@ function KanbanBoard({
                     selected={selectedTaskId === task.id}
                     onSelect={onSelect}
                     onEdit={onEdit}
+                    onCycleStatus={onCycleStatus}
                     compact
                   />
                 ))
@@ -2559,7 +2782,9 @@ function EpicSlate({
           <div key={lane.id} className="slate-lane">
             <div className="slate-lane-head">
               <div className="slate-lane-title">
-                <strong>{lane.title}</strong>
+                <strong>
+                  {lane.id >= 0 ? <span className="epic-num">#{lane.id}</span> : null} {lane.title}
+                </strong>
                 <span>{done}/{total} closed</span>
               </div>
               <div className="slate-lane-track">
@@ -2838,9 +3063,19 @@ function DependencyGraph({
               key={node.id}
               className={`dependency-node is-${node.priority} ${selectedTaskId === node.id ? 'is-selected' : ''} ${hoveredNodeId === node.id ? 'is-hovered' : ''} ${isConnected ? 'is-connected' : ''}`}
               transform={`translate(${node.x}, ${node.y})`}
+              role="button"
+              tabIndex={0}
+              aria-label={`Task #${node.id}: ${node.title}. ${node.blocks.length} blocking, ${node.blockedBy.length} blockers.`}
               onMouseEnter={() => setHoveredNodeId(node.id)}
               onMouseLeave={() => setHoveredNodeId((current) => (current === node.id ? null : current))}
+              onFocus={() => setHoveredNodeId(node.id)}
               onClick={() => onSelectNode(node.id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onSelectNode(node.id);
+                }
+              }}
             >
               <rect x="-34" y="-24" width="68" height="48" rx="18" />
               <text textAnchor="middle" y="-5">#{node.id}</text>

@@ -2,6 +2,43 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 
+/// Concurrent `task create` invocations must not drop writes. Under WAL, SQLite
+/// serializes writers with a single lock; without a busy_timeout the second
+/// writer gets SQLITE_BUSY immediately and the insert is lost. This spawns
+/// several creates in parallel and asserts every one landed.
+#[test]
+fn test_concurrent_task_create_no_lost_writes() {
+    let temp = TempDir::new().unwrap();
+    myc_cmd(&temp).arg("init").output().expect("init");
+    myc_cmd(&temp)
+        .args(["epic", "create", "--title", "E"])
+        .output()
+        .expect("epic");
+
+    // Fire N creates concurrently (spawn without waiting).
+    let n = 6;
+    let mut children = Vec::new();
+    for i in 0..n {
+        let child = myc_cmd(&temp)
+            .args(["task", "create", "--title", &format!("T{i}"), "--epic", "1"])
+            .spawn()
+            .expect("spawn create");
+        children.push(child);
+    }
+    for mut child in children {
+        let status = child.wait().expect("wait");
+        assert!(status.success(), "a concurrent create failed with {status}");
+    }
+
+    let out = myc_cmd(&temp)
+        .args(["task", "list", "--all", "--format", "json"])
+        .output()
+        .expect("list");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let count = stdout.matches("\"id\"").count();
+    assert_eq!(count, n, "expected {n} tasks, got {count}: {stdout}");
+}
+
 fn myc_path() -> PathBuf {
     // First try CARGO_BIN_EXE_myc
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_myc") {
