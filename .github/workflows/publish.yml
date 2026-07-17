@@ -37,19 +37,22 @@ jobs:
             exit 1
           fi
 
-      - name: Wait for mycelium-manager-core to appear in the index
+      - name: Wait for mycelium-manager-core in the sparse index
         run: |
-          # crates.io index propagation is not instant; myc's publish will fail
-          # with "no matching package" until core is queryable. Poll a bit.
+          # cargo publish resolves deps from the SPARSE index (index.crates.io),
+          # which updates within ~a minute — much faster/more reliable than the
+          # `cargo search` API. Poll that directly for the just-published version.
+          ver=$(grep -m1 '^version' mycelium-core/Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
           for i in $(seq 1 30); do
-            if cargo search mycelium-manager-core 2>/dev/null | grep -q '^mycelium-manager-core '; then
-              echo "core is queryable"
+            if curl -sf "https://index.crates.io/my/ce/mycelium-manager-core" \
+                 | grep -q "\"vers\":\"${ver}\""; then
+              echo "core ${ver} is in the sparse index"
               exit 0
             fi
-            echo "waiting for core in index ($i/30)..."
+            echo "waiting for core ${ver} in sparse index ($i/30)..."
             sleep 10
           done
-          echo "core did not appear in index in time" >&2
+          echo "core did not appear in the sparse index in time" >&2
           exit 1
 
       - name: Publish mycelium-manager (myc)
@@ -57,11 +60,17 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -o pipefail
-          if cargo publish -p mycelium-manager 2>&1 | tee /tmp/myc.log; then
-            echo "myc published"
-          elif grep -q "already exists" /tmp/myc.log; then
-            echo "myc version already on crates.io — nothing to do"
-          else
-            echo "myc publish failed" >&2
-            exit 1
-          fi
+          # Retry a few times: even after the index shows core, cargo may briefly
+          # fail to resolve it. Tolerate an already-published version.
+          for attempt in 1 2 3 4 5; do
+            if cargo publish -p mycelium-manager 2>&1 | tee /tmp/myc.log; then
+              echo "myc published"; exit 0
+            elif grep -q "already exists" /tmp/myc.log; then
+              echo "myc version already on crates.io — nothing to do"; exit 0
+            elif grep -q "no matching package" /tmp/myc.log; then
+              echo "core not yet resolvable, retrying ($attempt/5)..."; sleep 20
+            else
+              echo "myc publish failed" >&2; exit 1
+            fi
+          done
+          echo "myc publish failed after retries" >&2; exit 1
