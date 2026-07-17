@@ -1,0 +1,115 @@
+name: Release
+
+# Builds the `myc` CLI binaries and the MycUI desktop app bundles for every
+# platform and attaches them to the GitHub Release for the pushed tag.
+# Triggered by version tags (the same tags used for the crate, e.g. v0.2.4).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ---- MycUI desktop bundles (Tauri) -------------------------------------
+  mycui:
+    name: MycUI (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest   # Apple Silicon + Intel via universal
+            args: "--target universal-apple-darwin"
+          - platform: ubuntu-latest
+            args: ""
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOS universal build needs both arch targets.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # Tauri's Linux bundler needs GTK/WebKit and friends.
+      - name: Install Linux system deps
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
+
+      - name: Install frontend deps
+        working-directory: mycui
+        run: bun install
+
+      - name: Build + bundle MycUI and upload to the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: mycui
+          tagName: ${{ github.ref_name }}
+          releaseName: "Mycelium ${{ github.ref_name }}"
+          releaseBody: "MycUI desktop app + `myc` CLI. See assets below."
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  # ---- myc CLI binaries --------------------------------------------------
+  cli:
+    name: myc CLI (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build myc
+        run: cargo build --release --bin myc --target ${{ matrix.target }}
+
+      # Package the binary as a per-target archive so it uploads cleanly.
+      - name: Package (unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          bin="target/${{ matrix.target }}/release/myc"
+          tar -czf "myc-${{ matrix.target }}.tar.gz" -C "$(dirname "$bin")" myc
+
+      - name: Package (windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/myc.exe" -DestinationPath "myc-${{ matrix.target }}.zip"
+
+      - name: Upload CLI archive to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            myc-${{ matrix.target }}.tar.gz
+            myc-${{ matrix.target }}.zip
+          fail_on_unmatched_files: false
