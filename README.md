@@ -23,7 +23,9 @@ tool (plus an optional desktop GUI, [MycUI](#gui-mycui-pre-built-download)).
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 <p align="center">
-  <img src="assets/demo.gif" alt="Mycelium CLI demo" width="800">
+  <img src="assets/demo.gif" alt="A coding agent using Mycelium to plan and track work" width="900">
+  <br>
+  <em>A real Claude Code session driving <code>myc</code> to plan work in a repo.</em>
 </p>
 
 ## Why agents
