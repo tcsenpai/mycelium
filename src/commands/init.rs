@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 3;
+const AGENTS_MD_VERSION: u32 = 4;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -29,13 +29,18 @@ myc epic create --title "Feature X" --description "Build feature X"
 myc task create --title "Implement Y" --description "Build the implementation for Y" --epic 1 --priority high --due 2025-12-31
 
 # Task priorities: low, medium, high, critical
-# Task status: open, closed
+# Task status: open, in_progress, closed
+# Mark a task as in progress (there is no `task start`; use update):
+myc task update 1 --status in_progress
 
-# List tasks
+# List tasks. `myc list` (top-level) shows a TREE with dependencies and epic
+# grouping — use it to see the overall state. `myc task list` is a flat list.
+myc list
 myc task list
 myc task list --epic 1
 myc task list --overdue
 myc task list --blocked
+myc task list --all          # include closed tasks
 
 # Manage dependencies (task 1 blocks task 2)
 myc task link blocks --task 1 2
@@ -133,13 +138,15 @@ shouldn't act on right now.
 
 When working on this project:
 
-1. Check existing tasks: `myc task list`
+1. At the START of a task, reconstruct state instead of relying on memory:
+   `myc list` (tree with dependencies) and `myc followup list -o` (open items).
 2. Check blocked tasks: `myc task list --blocked`
 3. Create tasks for new work: `myc task create --title "..." --description "..." --epic N`
-4. Capture incidental observations as follow-ups: `myc followup add "..."`
-5. At end of task: `myc followup list` and surface open ones to the user
-6. Mark tasks complete when done: `myc task close N`
-7. Use `--format json` for machine-readable output: `myc task list --format json`
+4. Mark a task in progress while you work on it: `myc task update N --status in_progress`
+5. Capture incidental observations as follow-ups: `myc followup add "..."`
+6. At end of task: `myc followup list` and surface open ones to the user
+7. Mark tasks complete when done: `myc task close N`
+8. Use `--format json` for machine-readable output: `myc task list --format json`
 
 ## Mental Frameworks for Mycelium Usage
 
