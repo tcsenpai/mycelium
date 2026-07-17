@@ -14,23 +14,23 @@ A robust, production-grade task/plan manager CLI designed for reliability, agent
 
 ## Features
 
-- **📦 Single Binary**: Statically compiled, no dependencies
-- **🗄️ Git-Trackable**: SQLite storage designed for version control
-- **🔗 Dependency Management**: Task blocking with cycle detection
-- **👤 Assignees**: Local assignees with GitHub username linking
-- **🌐 External References**: Link tasks to GitHub issues/PRs and URLs
-- **🤖 Agent-Optimized**: One-shot CLI with JSON output support
-- **⚡ Fast**: Sub-100ms response time for typical operations
-- **🛡️ Safe**: Comprehensive error handling and validation
-- **📋 Smart List View**: Tree visualization for dependencies, epic grouping for simple lists
-- **📝 Task Notes**: Add comments and notes to tasks
-- **📎 Task Cloning**: Duplicate tasks with all metadata
-- **📦 Batch Operations**: Close, tag, or move multiple tasks at once
-- **📌 Follow-ups**: Lightweight "oh-by-the-way" scratch table for non-blocking items captured mid-work
+- **Single Binary**: Statically compiled, no dependencies
+- **Git-Trackable**: SQLite storage designed for version control
+- **Dependency Management**: Task blocking with cycle detection
+- **Assignees**: Local assignees with GitHub username linking
+- **External References**: Link tasks to GitHub issues/PRs and URLs
+- **Agent-Optimized**: One-shot CLI with JSON output support
+- **Fast**: Sub-100ms response time for typical operations
+- **Safe**: Comprehensive error handling and validation
+- **Smart List View**: Tree visualization for dependencies, epic grouping for simple lists
+- **Task Notes**: Add comments and notes to tasks
+- **Task Cloning**: Duplicate tasks with all metadata
+- **Batch Operations**: Close, tag, or move multiple tasks at once
+- **Follow-ups**: Lightweight scratch table for non-blocking items captured mid-work
 
 ## Installation
 
-### CLI (`myc`) — From crates.io (Recommended)
+### CLI (`myc`) via crates.io (recommended)
 
 ```bash
 cargo install mycelium-manager
@@ -38,7 +38,7 @@ cargo install mycelium-manager
 
 Installs the `myc` binary to `~/.cargo/bin/`. Requires Rust 1.75+.
 
-### CLI (`myc`) — From Source
+### CLI (`myc`) from source
 
 ```bash
 git clone https://github.com/tcsenpai/mycelium
@@ -48,7 +48,7 @@ cargo build --release
 sudo cp target/release/myc /usr/local/bin/
 ```
 
-### GUI (`MycUI`) — From Source
+### GUI (`MycUI`) from source
 
 MycUI is a [Tauri](https://tauri.app) desktop app built with React and TypeScript.
 
@@ -84,6 +84,21 @@ The install script detects your platform, builds, and installs both `myc` (CLI) 
 ./install.sh --all       # Install both (default)
 INSTALL_DIR=~/.local/bin ./install.sh --cli  # Custom install path (CLI)
 ```
+
+## Versioning
+
+The CLI (`myc`) and the desktop app (MycUI) are versioned independently and
+released on their own cadence. The CLI is published to crates.io as
+`mycelium-manager`; MycUI ships as a desktop bundle attached to GitHub
+Releases. There is no requirement to run matching version numbers.
+
+They stay compatible because both read the same on-disk SQLite database in
+`.mycelium/mycelium.db` and apply the same schema, which is guarded by a
+schema-equality test in CI. You can run any released CLI alongside any
+released MycUI against the same project, use either tool on its own, or mix
+them freely. Neither depends on the other at runtime: the CLI is a standalone
+binary, and MycUI talks to the database directly rather than shelling out to
+`myc`.
 
 ## Quick Start
 
@@ -170,6 +185,7 @@ myc task close <id> [--force]   # Close (blocked tasks need --force)
 myc task reopen <id>
 myc task delete <id> [--force]
 myc task assign <task_id> <assignee_id|0>
+```
 
 ### Batch Operations
 
@@ -195,7 +211,6 @@ myc task notes <task_id>                  # Show all notes for a task
 
 ```bash
 myc task clone <id> [--title "New Title"]  # Clone a task (copies description, priority, etc.)
-```
 ```
 
 ### Dependencies
@@ -227,8 +242,8 @@ myc task unlink <ref_id>
 ### Follow-ups
 
 Lightweight scratch table for non-blocking items captured mid-work
-(bugs you noticed, questions, ideas). Separate from tasks — no
-epic/priority/deps. Body is required, title optional. Statuses:
+(bugs you noticed, questions, ideas). They are separate from tasks and
+carry no epic, priority, or dependencies. Body is required, title optional. Statuses:
 `open`, `in_progress`, `done`, `wontfix`.
 
 ```bash
@@ -387,7 +402,7 @@ bun run tauri:dev
 - **Rusqlite** - SQLite bindings with bundled lib
 - **Tauri** - Desktop GUI framework (MycUI)
 - **React + TypeScript** - MycUI frontend
-- **Tailwind CSS** - MycUI styling
+- **Hand-written CSS** - MycUI styling (no CSS framework)
 
 ## License
 
