@@ -14,11 +14,11 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_global_shortcut::{Shortcut, Code, Modifiers};
 use tauri_plugin_dialog::DialogExt;
 
-mod db;
-mod models;
+mod dto;
 
-use db::Database;
-use models::*;
+use dto::*;
+use mycelium_core::Database;
+use std::collections::HashMap;
 
 const MAX_RECENT_FOLDERS: usize = 10;
 
@@ -250,12 +250,70 @@ async fn get_recent_folders(
     Ok(get_recent_folders_from_disk(&app_dir))
 }
 
+// ---------------------------------------------------------------------------
+// Helpers: batch-build frontend Task DTOs from core rows (avoids N+1 queries)
+// ---------------------------------------------------------------------------
+
+/// Build epic_id -> title and assignee_id -> name lookup maps in two queries,
+/// then assemble frontend `Task` DTOs (with `epic_title`/`assignee_name`
+/// filled in) and dependency info via a single batched call.
+fn build_task_dtos(db: &Database, tasks: Vec<mycelium_core::models::Task>) -> Result<Vec<Task>, String> {
+    let epics = db.list_epics().map_err(|e| e.to_string())?;
+    let epic_titles: HashMap<i64, String> = epics.into_iter().map(|e| (e.id, e.title)).collect();
+
+    let assignees = db.list_assignees().map_err(|e| e.to_string())?;
+    let assignee_names: HashMap<i64, String> =
+        assignees.into_iter().map(|a| (a.id, a.name)).collect();
+
+    let ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
+    let deps = db
+        .get_dependencies_for_tasks(&ids)
+        .map_err(|e| e.to_string())?;
+
+    let dtos = tasks
+        .into_iter()
+        .map(|t| {
+            let epic_title = t.epic_id.and_then(|id| epic_titles.get(&id).cloned());
+            let assignee_name = t.assignee_id.and_then(|id| assignee_names.get(&id).cloned());
+            let (blocked_by, blocks) = deps.get(&t.id).cloned().unwrap_or_default();
+            dto::task_from_core(t, epic_title, assignee_name, blocked_by, blocks)
+        })
+        .collect();
+
+    Ok(dtos)
+}
+
+fn build_task_dto(db: &Database, task: mycelium_core::models::Task) -> Result<Task, String> {
+    let epic_title = match task.epic_id {
+        Some(id) => db
+            .get_epic(id)
+            .map_err(|e| e.to_string())?
+            .map(|e| e.title),
+        None => None,
+    };
+    let assignee_name = match task.assignee_id {
+        Some(id) => db
+            .get_assignee(id)
+            .map_err(|e| e.to_string())?
+            .map(|a| a.name),
+        None => None,
+    };
+    let deps = db.get_all_dependencies(task.id).map_err(|e| e.to_string())?;
+    Ok(dto::task_from_core(
+        task,
+        epic_title,
+        assignee_name,
+        deps.blocked_by,
+        deps.blocks,
+    ))
+}
+
 #[tauri::command]
 async fn get_dashboard_stats(
     state: tauri::State<'_, AppState>
 ) -> Result<DashboardStats, String> {
     let db = state.db.lock().await;
-    db.get_dashboard_stats().map_err(|e| e.to_string())
+    db.get_dashboard_stats().map_err(|e| e.to_string()).map(Into::into)
 }
 
 #[tauri::command]
@@ -264,7 +322,35 @@ async fn get_tasks(
     filters: TaskFilters,
 ) -> Result<Vec<Task>, String> {
     let db = state.db.lock().await;
-    db.get_tasks(filters).map_err(|e| e.to_string())
+    let core_status: Option<mycelium_core::models::Status> = filters.status.map(Into::into);
+    let core_priority: Option<mycelium_core::models::Priority> = filters.priority.map(Into::into);
+
+    let tasks = db
+        .list_tasks(
+            filters.epic_id,
+            core_status,
+            core_priority,
+            filters.assignee_id,
+            filters.blocked,
+            filters.overdue,
+            filters.tag.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut dtos = build_task_dtos(&db, tasks)?;
+
+    if let Some(search) = filters.search {
+        let search_lower = search.to_lowercase();
+        dtos.retain(|t| {
+            t.title.to_lowercase().contains(&search_lower)
+                || t.description
+                    .as_ref()
+                    .map(|d| d.to_lowercase().contains(&search_lower))
+                    .unwrap_or(false)
+        });
+    }
+
+    Ok(dtos)
 }
 
 #[tauri::command]
@@ -273,7 +359,10 @@ async fn get_task(
     id: i64,
 ) -> Result<Option<Task>, String> {
     let db = state.db.lock().await;
-    db.get_task(id).map_err(|e| e.to_string())
+    match db.get_task(id).map_err(|e| e.to_string())? {
+        Some(task) => Ok(Some(build_task_dto(&db, task)?)),
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]
@@ -282,7 +371,28 @@ async fn create_task(
     task: NewTask,
 ) -> Result<Task, String> {
     let mut db = state.db.lock().await;
-    db.create_task(task).map_err(|e| e.to_string())
+    let due_date = task
+        .due_date
+        .as_deref()
+        .map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d"))
+        .transpose()
+        .map_err(|e| e.to_string())?;
+
+    let created = db
+        .create_task(
+            &task.title,
+            task.description.as_deref(),
+            task.epic_id,
+            task.priority.into(),
+            task.assignee_id,
+            due_date,
+            task.tags.as_deref(),
+            None,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+
+    build_task_dto(&db, created)
 }
 
 #[tauri::command]
@@ -292,7 +402,35 @@ async fn update_task(
     updates: TaskUpdate,
 ) -> Result<Task, String> {
     let mut db = state.db.lock().await;
-    db.update_task(id, updates).map_err(|e| e.to_string())
+
+    let due_date: Option<Option<chrono::NaiveDate>> = match updates.due_date {
+        Some(Some(d)) => Some(Some(
+            chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").map_err(|e| e.to_string())?,
+        )),
+        Some(None) => Some(None),
+        None => None,
+    };
+
+    let tags: Option<Option<&str>> = updates.tags.as_ref().map(|o| o.as_deref());
+
+    let updated = db
+        .update_task(
+            id,
+            updates.title.as_deref(),
+            updates.description.as_deref(),
+            updates.status.map(Into::into),
+            updates.priority.map(Into::into),
+            updates.epic_id,
+            updates.assignee_id,
+            due_date,
+            tags,
+            None,
+            None,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+
+    build_task_dto(&db, updated)
 }
 
 #[tauri::command]
@@ -310,7 +448,23 @@ async fn start_task(
     id: i64,
 ) -> Result<Task, String> {
     let mut db = state.db.lock().await;
-    db.start_task(id).map_err(|e| e.to_string())
+    let updated = db
+        .update_task(
+            id,
+            None,
+            None,
+            Some(mycelium_core::models::Status::InProgress),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+    build_task_dto(&db, updated)
 }
 
 #[tauri::command]
@@ -328,7 +482,23 @@ async fn close_task(
             .join(", ");
         return Err(format!("Task #{id} is blocked by {blocker_list}"));
     }
-    db.close_task(id).map_err(|e| e.to_string())
+    let updated = db
+        .update_task(
+            id,
+            None,
+            None,
+            Some(mycelium_core::models::Status::Closed),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+    build_task_dto(&db, updated)
 }
 
 #[tauri::command]
@@ -337,7 +507,23 @@ async fn reopen_task(
     id: i64,
 ) -> Result<Task, String> {
     let mut db = state.db.lock().await;
-    db.reopen_task(id).map_err(|e| e.to_string())
+    let updated = db
+        .update_task(
+            id,
+            None,
+            None,
+            Some(mycelium_core::models::Status::Open),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+    build_task_dto(&db, updated)
 }
 
 #[tauri::command]
@@ -345,7 +531,8 @@ async fn get_epics(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Epic>, String> {
     let db = state.db.lock().await;
-    db.get_epics().map_err(|e| e.to_string())
+    let summaries = db.list_epics_with_summary().map_err(|e| e.to_string())?;
+    Ok(summaries.into_iter().map(Into::into).collect())
 }
 
 #[tauri::command]
@@ -354,7 +541,8 @@ async fn get_epic(
     id: i64,
 ) -> Result<Option<Epic>, String> {
     let db = state.db.lock().await;
-    db.get_epic(id).map_err(|e| e.to_string())
+    let summaries = db.list_epics_with_summary().map_err(|e| e.to_string())?;
+    Ok(summaries.into_iter().find(|s| s.epic.id == id).map(Into::into))
 }
 
 #[tauri::command]
@@ -363,7 +551,15 @@ async fn create_epic(
     epic: NewEpic,
 ) -> Result<Epic, String> {
     let mut db = state.db.lock().await;
-    db.create_epic(epic).map_err(|e| e.to_string())
+    let created = db
+        .create_epic(&epic.title, epic.description.as_deref(), None, None)
+        .map_err(|e| e.to_string())?;
+    let summaries = db.list_epics_with_summary().map_err(|e| e.to_string())?;
+    summaries
+        .into_iter()
+        .find(|s| s.epic.id == created.id)
+        .map(Into::into)
+        .ok_or_else(|| "Epic not found after creation".to_string())
 }
 
 #[tauri::command]
@@ -373,7 +569,23 @@ async fn update_epic(
     updates: EpicUpdate,
 ) -> Result<Epic, String> {
     let mut db = state.db.lock().await;
-    db.update_epic(id, updates).map_err(|e| e.to_string())
+    db.update_epic(
+        id,
+        updates.title.as_deref(),
+        updates.description.as_deref(),
+        updates.status.map(Into::into),
+        None,
+        None,
+        None,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let summaries = db.list_epics_with_summary().map_err(|e| e.to_string())?;
+    summaries
+        .into_iter()
+        .find(|s| s.epic.id == id)
+        .map(Into::into)
+        .ok_or_else(|| "Epic not found after update".to_string())
 }
 
 #[tauri::command]
@@ -390,7 +602,8 @@ async fn get_assignees(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Assignee>, String> {
     let db = state.db.lock().await;
-    db.get_assignees().map_err(|e| e.to_string())
+    let stats = db.list_assignees_with_stats().map_err(|e| e.to_string())?;
+    Ok(stats.into_iter().map(Into::into).collect())
 }
 
 #[tauri::command]
@@ -399,7 +612,19 @@ async fn create_assignee(
     assignee: NewAssignee,
 ) -> Result<Assignee, String> {
     let mut db = state.db.lock().await;
-    db.create_assignee(assignee).map_err(|e| e.to_string())
+    let created = db
+        .create_assignee(
+            &assignee.name,
+            assignee.email.as_deref(),
+            assignee.github_username.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+    let stats = db.list_assignees_with_stats().map_err(|e| e.to_string())?;
+    stats
+        .into_iter()
+        .find(|s| s.assignee.id == created.id)
+        .map(Into::into)
+        .ok_or_else(|| "Assignee not found after creation".to_string())
 }
 
 #[tauri::command]
@@ -428,7 +653,9 @@ async fn get_dependencies(
     task_id: i64,
 ) -> Result<DependencyChain, String> {
     let db = state.db.lock().await;
-    db.get_dependencies(task_id).map_err(|e| e.to_string())
+    db.get_all_dependencies(task_id)
+        .map_err(|e| e.to_string())
+        .map(Into::into)
 }
 
 #[tauri::command]
@@ -437,7 +664,21 @@ async fn search_tasks(
     query: String,
 ) -> Result<Vec<Task>, String> {
     let db = state.db.lock().await;
-    db.search_tasks(&query).map_err(|e| e.to_string())
+    let tasks = db
+        .list_tasks(None, None, None, None, false, false, None)
+        .map_err(|e| e.to_string())?;
+    let mut dtos = build_task_dtos(&db, tasks)?;
+
+    let search_lower = query.to_lowercase();
+    dtos.retain(|t| {
+        t.title.to_lowercase().contains(&search_lower)
+            || t.description
+                .as_ref()
+                .map(|d| d.to_lowercase().contains(&search_lower))
+                .unwrap_or(false)
+    });
+
+    Ok(dtos)
 }
 
 #[tauri::command]
@@ -445,7 +686,23 @@ async fn get_all_tags(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
     let db = state.db.lock().await;
-    db.get_all_tags().map_err(|e| e.to_string())
+    let tasks = db.list_all_tasks().map_err(|e| e.to_string())?;
+
+    let mut all_tags = std::collections::HashSet::new();
+    for task in tasks {
+        if let Some(tags) = task.tags {
+            for tag in tags.split(',') {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    all_tags.insert(tag.to_string());
+                }
+            }
+        }
+    }
+
+    let mut result: Vec<String> = all_tags.into_iter().collect();
+    result.sort();
+    Ok(result)
 }
 
 #[tauri::command]
@@ -454,7 +711,14 @@ async fn list_followups(
     include_closed: Option<bool>,
 ) -> Result<Vec<Followup>, String> {
     let db = state.db.lock().await;
-    db.list_followups(include_closed.unwrap_or(false)).map_err(|e| e.to_string())
+    let status_filter = if include_closed.unwrap_or(false) {
+        None
+    } else {
+        Some("active")
+    };
+    db.list_followups(status_filter)
+        .map_err(|e| e.to_string())
+        .map(|v| v.into_iter().map(Into::into).collect())
 }
 
 #[tauri::command]
@@ -463,7 +727,9 @@ async fn get_followup(
     id: i64,
 ) -> Result<Option<Followup>, String> {
     let db = state.db.lock().await;
-    db.get_followup(id).map_err(|e| e.to_string())
+    db.get_followup(id)
+        .map_err(|e| e.to_string())
+        .map(|o| o.map(Into::into))
 }
 
 #[tauri::command]
@@ -472,7 +738,9 @@ async fn create_followup(
     followup: NewFollowup,
 ) -> Result<Followup, String> {
     let mut db = state.db.lock().await;
-    db.create_followup(followup).map_err(|e| e.to_string())
+    db.create_followup(&followup.body, followup.title.as_deref())
+        .map_err(|e| e.to_string())
+        .map(Into::into)
 }
 
 #[tauri::command]
@@ -483,7 +751,9 @@ async fn set_followup_status(
     reason: Option<String>,
 ) -> Result<Followup, String> {
     let mut db = state.db.lock().await;
-    db.update_followup_status(id, status, reason).map_err(|e| e.to_string())
+    db.update_followup_status(id, status.into(), reason.as_deref())
+        .map_err(|e| e.to_string())
+        .map(Into::into)
 }
 
 #[tauri::command]
@@ -494,7 +764,21 @@ async fn update_followup(
     title: Option<Option<String>>,
 ) -> Result<Followup, String> {
     let mut db = state.db.lock().await;
-    db.update_followup_body(id, body, title).map_err(|e| e.to_string())
+    // mycui's `title: Option<Option<String>>` (outer: "was a title value passed
+    // at all", inner: "clear it vs set it") maps onto core's two-parameter
+    // `(title: Option<&str>, clear_title: bool)` as follows:
+    //   outer None       -> (None, false)       leave title untouched
+    //   outer Some(None) -> (None, true)         clear title
+    //   outer Some(Some(s)) -> (Some(&s), false) set title to s
+    let (core_title, clear_title): (Option<&str>, bool) = match &title {
+        None => (None, false),
+        Some(None) => (None, true),
+        Some(Some(s)) => (Some(s.as_str()), false),
+    };
+
+    db.update_followup_body(id, body.as_deref(), core_title, clear_title)
+        .map_err(|e| e.to_string())
+        .map(Into::into)
 }
 
 #[tauri::command]
@@ -504,7 +788,24 @@ async fn append_followup(
     text: String,
 ) -> Result<Followup, String> {
     let mut db = state.db.lock().await;
-    db.append_followup_body(id, &text).map_err(|e| e.to_string())
+    // core has no append primitive; replicate mycui's previous behavior here:
+    // append a "[timestamp] text" block to the existing body, matching the
+    // CLI's timestamp format so entries stay consistent across tools.
+    let existing = db
+        .get_followup(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Follow-up #{id} not found"))?;
+
+    let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M %z");
+    let new_body = if existing.body.trim().is_empty() {
+        format!("[{}] {}", stamp, text)
+    } else {
+        format!("{}\n\n[{}] {}", existing.body.trim_end(), stamp, text)
+    };
+
+    db.update_followup_body(id, Some(&new_body), None, false)
+        .map_err(|e| e.to_string())
+        .map(Into::into)
 }
 
 #[tauri::command]
@@ -521,7 +822,7 @@ async fn count_followups(
     state: tauri::State<'_, AppState>,
 ) -> Result<FollowupCounts, String> {
     let db = state.db.lock().await;
-    db.count_followups().map_err(|e| e.to_string())
+    db.count_followups().map_err(|e| e.to_string()).map(Into::into)
 }
 
 fn main() {

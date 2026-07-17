@@ -1,3 +1,13 @@
+// Frontend-facing DTOs (Data Transfer Objects).
+//
+// These types are the wire contract with the React frontend (mycui/src/lib/types.ts).
+// They are copied verbatim from the previous mycui/src-tauri/src/models.rs so that
+// the JSON shape sent over Tauri's IPC bridge is byte-for-byte unchanged, even
+// though the underlying storage/query logic now lives in `mycelium_core`.
+//
+// Do NOT rename fields or change serde attributes here without also updating
+// mycui/src/lib/types.ts.
+
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
@@ -146,7 +156,7 @@ pub struct FollowupCounts {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum FollowupStatus {
     Open,
     InProgress,
@@ -179,7 +189,7 @@ impl std::str::FromStr for FollowupStatus {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Status {
     Open,
     InProgress,
@@ -272,6 +282,185 @@ impl Task {
             Status::Open => "○",
             Status::InProgress => "◐",
             Status::Closed => "✓",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Conversions: mycelium_core types -> DTOs
+// ---------------------------------------------------------------------------
+
+impl From<mycelium_core::models::Status> for Status {
+    fn from(s: mycelium_core::models::Status) -> Self {
+        match s {
+            mycelium_core::models::Status::Open => Status::Open,
+            mycelium_core::models::Status::InProgress => Status::InProgress,
+            mycelium_core::models::Status::Closed => Status::Closed,
+        }
+    }
+}
+
+impl From<Status> for mycelium_core::models::Status {
+    fn from(s: Status) -> Self {
+        match s {
+            Status::Open => mycelium_core::models::Status::Open,
+            Status::InProgress => mycelium_core::models::Status::InProgress,
+            Status::Closed => mycelium_core::models::Status::Closed,
+        }
+    }
+}
+
+impl From<mycelium_core::models::Priority> for Priority {
+    fn from(p: mycelium_core::models::Priority) -> Self {
+        match p {
+            mycelium_core::models::Priority::Low => Priority::Low,
+            mycelium_core::models::Priority::Medium => Priority::Medium,
+            mycelium_core::models::Priority::High => Priority::High,
+            mycelium_core::models::Priority::Critical => Priority::Critical,
+        }
+    }
+}
+
+impl From<Priority> for mycelium_core::models::Priority {
+    fn from(p: Priority) -> Self {
+        match p {
+            Priority::Low => mycelium_core::models::Priority::Low,
+            Priority::Medium => mycelium_core::models::Priority::Medium,
+            Priority::High => mycelium_core::models::Priority::High,
+            Priority::Critical => mycelium_core::models::Priority::Critical,
+        }
+    }
+}
+
+impl From<mycelium_core::models::FollowupStatus> for FollowupStatus {
+    fn from(s: mycelium_core::models::FollowupStatus) -> Self {
+        match s {
+            mycelium_core::models::FollowupStatus::Open => FollowupStatus::Open,
+            mycelium_core::models::FollowupStatus::InProgress => FollowupStatus::InProgress,
+            mycelium_core::models::FollowupStatus::Done => FollowupStatus::Done,
+            mycelium_core::models::FollowupStatus::Wontfix => FollowupStatus::Wontfix,
+        }
+    }
+}
+
+impl From<FollowupStatus> for mycelium_core::models::FollowupStatus {
+    fn from(s: FollowupStatus) -> Self {
+        match s {
+            FollowupStatus::Open => mycelium_core::models::FollowupStatus::Open,
+            FollowupStatus::InProgress => mycelium_core::models::FollowupStatus::InProgress,
+            FollowupStatus::Done => mycelium_core::models::FollowupStatus::Done,
+            FollowupStatus::Wontfix => mycelium_core::models::FollowupStatus::Wontfix,
+        }
+    }
+}
+
+impl From<mycelium_core::models::Followup> for Followup {
+    fn from(f: mycelium_core::models::Followup) -> Self {
+        Followup {
+            id: f.id,
+            body: f.body,
+            title: f.title,
+            status: f.status.into(),
+            closure_reason: f.closure_reason,
+            created_at: f.created_at,
+            closed_at: f.closed_at,
+        }
+    }
+}
+
+impl From<mycelium_core::db::FollowupCounts> for FollowupCounts {
+    fn from(c: mycelium_core::db::FollowupCounts) -> Self {
+        FollowupCounts {
+            open: c.open,
+            in_progress: c.in_progress,
+            done: c.done,
+            wontfix: c.wontfix,
+        }
+    }
+}
+
+impl From<mycelium_core::db::DashboardStats> for DashboardStats {
+    fn from(s: mycelium_core::db::DashboardStats) -> Self {
+        DashboardStats {
+            total_epics: s.total_epics,
+            open_epics: s.open_epics,
+            closed_epics: s.closed_epics,
+            total_tasks: s.total_tasks,
+            open_tasks: s.open_tasks,
+            closed_tasks: s.closed_tasks,
+            overdue_tasks: s.overdue_tasks,
+            blocked_tasks: s.blocked_tasks,
+            high_priority_open: s.high_priority_open,
+            completion_rate: s.completion_rate,
+        }
+    }
+}
+
+impl From<mycelium_core::models::dependency::DependencyChain> for DependencyChain {
+    fn from(d: mycelium_core::models::dependency::DependencyChain) -> Self {
+        DependencyChain {
+            task_id: d.task_id,
+            blocked_by: d.blocked_by,
+            blocks: d.blocks,
+            all_dependencies: d.all_dependencies,
+        }
+    }
+}
+
+/// Convert a core `Task` plus looked-up relations into the frontend `Task` DTO.
+/// `epic_title`/`assignee_name` are resolved by the caller (batched lookups)
+/// to avoid N+1 queries; `blocked_by`/`blocks` come from
+/// `get_dependencies_for_tasks`.
+pub fn task_from_core(
+    t: mycelium_core::models::Task,
+    epic_title: Option<String>,
+    assignee_name: Option<String>,
+    blocked_by: Vec<i64>,
+    blocks: Vec<i64>,
+) -> Task {
+    Task {
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        status: t.status.into(),
+        priority: t.priority.into(),
+        epic_id: t.epic_id,
+        epic_title,
+        assignee_id: t.assignee_id,
+        assignee_name,
+        due_date: t.due_date,
+        tags: t.tags,
+        created_at: t.created_at,
+        updated_at: t.updated_at,
+        blocked_by,
+        blocks,
+    }
+}
+
+impl From<mycelium_core::models::epic::EpicSummary> for Epic {
+    fn from(s: mycelium_core::models::epic::EpicSummary) -> Self {
+        Epic {
+            id: s.epic.id,
+            title: s.epic.title,
+            description: s.epic.description,
+            status: s.epic.status.into(),
+            total_tasks: s.total_tasks,
+            open_tasks: s.open_tasks,
+            created_at: s.epic.created_at,
+            updated_at: s.epic.updated_at,
+        }
+    }
+}
+
+impl From<mycelium_core::models::assignee::AssigneeWithStats> for Assignee {
+    fn from(s: mycelium_core::models::assignee::AssigneeWithStats) -> Self {
+        Assignee {
+            id: s.assignee.id,
+            name: s.assignee.name,
+            email: s.assignee.email,
+            github_username: s.assignee.github_username,
+            total_tasks: s.total_tasks,
+            open_tasks: s.open_tasks,
         }
     }
 }

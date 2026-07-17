@@ -1151,6 +1151,63 @@ impl Database {
         })
     }
 
+    /// Richer dashboard metrics for GUI consumers. Unlike `get_summary`,
+    /// `open_tasks`/overdue/high-priority count both open AND in_progress, and
+    /// it adds `high_priority_open` + `completion_rate`.
+    pub fn get_dashboard_stats(&self) -> Result<DashboardStats> {
+        let total_epics: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM epics", [], |row| row.get(0))?;
+        let open_epics: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM epics WHERE status = 'open'",
+            [],
+            |row| row.get(0),
+        )?;
+        let total_tasks: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
+        let open_tasks: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE status IN ('open', 'in_progress')",
+            [],
+            |row| row.get(0),
+        )?;
+        let overdue_tasks: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE status IN ('open', 'in_progress') AND due_date < ?1",
+            [chrono::Local::now().naive_local().date().to_string()],
+            |row| row.get(0),
+        )?;
+        let blocked_tasks: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT d.task_id) FROM dependencies d
+             JOIN tasks t ON t.id = d.depends_on_task_id
+             WHERE t.status IN ('open', 'in_progress')",
+            [],
+            |row| row.get(0),
+        )?;
+        let high_priority_open: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE status IN ('open', 'in_progress') AND priority IN ('high', 'critical')",
+            [],
+            |row| row.get(0),
+        )?;
+        let completion_rate = if total_tasks > 0 {
+            ((total_tasks - open_tasks) as f64 / total_tasks as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        Ok(DashboardStats {
+            total_epics,
+            open_epics,
+            closed_epics: total_epics - open_epics,
+            total_tasks,
+            open_tasks,
+            closed_tasks: total_tasks - open_tasks,
+            overdue_tasks,
+            blocked_tasks,
+            high_priority_open,
+            completion_rate,
+        })
+    }
+
     // Linear sync operations
     pub fn create_linear_sync(
         &mut self,
@@ -1626,4 +1683,20 @@ pub struct Summary {
     pub closed_tasks: i64,
     pub overdue_tasks: i64,
     pub blocked_tasks: i64,
+}
+
+/// Richer dashboard metrics for GUI consumers (superset of `Summary`).
+/// `open_tasks` here counts open + in_progress; `completion_rate` is a percent.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DashboardStats {
+    pub total_epics: i64,
+    pub open_epics: i64,
+    pub closed_epics: i64,
+    pub total_tasks: i64,
+    pub open_tasks: i64,
+    pub closed_tasks: i64,
+    pub overdue_tasks: i64,
+    pub blocked_tasks: i64,
+    pub high_priority_open: i64,
+    pub completion_rate: f64,
 }
