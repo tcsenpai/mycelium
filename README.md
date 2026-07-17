@@ -48,6 +48,17 @@ cargo build --release
 sudo cp target/release/myc /usr/local/bin/
 ```
 
+### GUI (`MycUI`) pre-built download
+
+Each tagged release ships desktop bundles on the
+[GitHub Releases](https://github.com/tcsenpai/mycelium/releases) page:
+`.dmg`/`.app` (macOS), `.deb`/`.AppImage` (Linux), and `.msi`/`.exe` (Windows).
+Download the one for your platform and install it. Every release also attaches
+the `myc` CLI binaries, alongside the crates.io publish.
+
+> Note: macOS bundles are currently unsigned, so Gatekeeper may warn on first
+> launch (right-click → Open to bypass).
+
 ### GUI (`MycUI`) from source
 
 MycUI is a [Tauri](https://tauri.app) desktop app built with React and TypeScript.
