@@ -6,6 +6,12 @@ use crate::models::*;
 
 mod migrations;
 
+/// Latest schema version this build migrates to (see [`Database::schema_version`]).
+pub use migrations::CURRENT_VERSION as LATEST_SCHEMA_VERSION;
+
+/// Every application table the latest schema version is expected to have created.
+pub use migrations::EXPECTED_TABLES;
+
 /// Parse a status string from the database, returning a rusqlite error on failure.
 fn parse_status(s: &str) -> std::result::Result<Status, rusqlite::Error> {
     s.parse().map_err(|e| {
@@ -38,8 +44,66 @@ fn parse_ref_type(s: &str) -> std::result::Result<ExternalRefType, rusqlite::Err
     })
 }
 
+/// Order-preserving de-duplication of task ids for batch operations, so a
+/// repeated id is acted on (and reported) exactly once.
+fn dedupe_ids(ids: &[i64]) -> Vec<i64> {
+    let mut seen = std::collections::HashSet::new();
+    ids.iter().copied().filter(|id| seen.insert(*id)).collect()
+}
+
+/// Fetch a task by id using an in-progress transaction. Mirrors
+/// `Database::get_task` but takes a `&Transaction` so batch operations can
+/// re-read a row they just wrote without dropping the transaction borrow of
+/// `self.conn`.
+fn get_task_tx(tx: &Transaction, id: i64) -> Result<Option<Task>> {
+    let mut stmt = tx.prepare(
+        "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+         FROM tasks WHERE id = ?1"
+    )?;
+
+    let task = stmt.query_row([id], |row| {
+        let due_date: Option<String> = row.get(7)?;
+        Ok(Task {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            description: row.get(2)?,
+            status: parse_status(&row.get::<_, String>(3)?)?,
+            priority: parse_priority(&row.get::<_, String>(4)?)?,
+            epic_id: row.get(5)?,
+            assignee_id: row.get(6)?,
+            due_date: due_date.and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+            tags: row.get(8)?,
+            notes: row.get(9)?,
+            user_info: row.get(10)?,
+            agent_questions: row.get(11)?,
+            created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
+            updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+        })
+    });
+
+    match task {
+        Ok(t) => Ok(Some(t)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub struct Database {
     conn: Connection,
+}
+
+/// Result of a `batch_close_tasks` call, distinguishing every outcome a
+/// requested task id can have instead of collapsing them into one count.
+#[derive(Debug, Default)]
+pub struct BatchCloseOutcome {
+    /// Tasks actually transitioned to closed by this call.
+    pub closed: Vec<Task>,
+    /// Ids skipped because they have open blockers and `force` was not set.
+    pub blocked: Vec<i64>,
+    /// Ids that were already closed before this call.
+    pub already_closed: Vec<i64>,
+    /// Ids that don't correspond to any existing task.
+    pub not_found: Vec<i64>,
 }
 
 impl Database {
@@ -72,6 +136,12 @@ impl Database {
 
     pub fn migrate(&mut self) -> Result<()> {
         migrations::run_migrations(&mut self.conn)
+    }
+
+    /// The schema version recorded in this database (0 if uninitialized).
+    /// Compare against [`LATEST_SCHEMA_VERSION`] to detect an outdated schema.
+    pub fn schema_version(&self) -> Result<i32> {
+        migrations::schema_version(&self.conn)
     }
 
     pub fn get_conn(&self) -> &Connection {
@@ -954,70 +1024,135 @@ impl Database {
     }
 
     // Batch operations
-    pub fn batch_close_tasks(&mut self, task_ids: &[i64], force: bool) -> Result<Vec<Task>> {
-        let mut closed_tasks = Vec::new();
+    /// Close multiple tasks in a single transaction, reporting exactly what
+    /// happened to each requested id instead of silently dropping outcomes.
+    pub fn batch_close_tasks(
+        &mut self,
+        task_ids: &[i64],
+        force: bool,
+    ) -> Result<BatchCloseOutcome> {
+        let mut outcome = BatchCloseOutcome::default();
         let now = chrono::Local::now().to_rfc3339();
 
-        for &id in task_ids {
-            // Check for blockers unless force is true
-            if !force {
-                let blockers = self.get_open_blockers(id)?;
-                if !blockers.is_empty() {
-                    continue; // Skip this task if blocked
+        // Dedupe ids (order-preserving): a repeated id would otherwise get its
+        // second occurrence mis-bucketed (the pre-tx decision is stale after the
+        // first write closes it).
+        let task_ids = dedupe_ids(task_ids);
+
+        // Decide the fate of each id using read-only lookups BEFORE opening the
+        // transaction (get_task/get_open_blockers borrow &self, not &mut self).
+        enum Decision {
+            Close,
+            Blocked,
+            AlreadyClosed,
+            NotFound,
+        }
+
+        let mut decisions = Vec::with_capacity(task_ids.len());
+        for &id in &task_ids {
+            let decision = match self.get_task(id)? {
+                None => Decision::NotFound,
+                Some(task) if task.status == Status::Closed => Decision::AlreadyClosed,
+                Some(_) => {
+                    if !force && !self.get_open_blockers(id)?.is_empty() {
+                        Decision::Blocked
+                    } else {
+                        Decision::Close
+                    }
+                }
+            };
+            decisions.push((id, decision));
+        }
+
+        let tx = self.conn.transaction()?;
+        for (id, decision) in decisions {
+            match decision {
+                Decision::NotFound => outcome.not_found.push(id),
+                Decision::AlreadyClosed => outcome.already_closed.push(id),
+                Decision::Blocked => outcome.blocked.push(id),
+                Decision::Close => {
+                    let changed = tx.execute(
+                        "UPDATE tasks SET status = 'closed', updated_at = ?1 WHERE id = ?2 AND status IN ('open', 'in_progress')",
+                        (&now, id),
+                    )?;
+                    if changed == 1 {
+                        if let Some(task) = get_task_tx(&tx, id)? {
+                            outcome.closed.push(task);
+                        }
+                    } else {
+                        // Row changed underneath us between the read and the write;
+                        // treat conservatively as not found rather than lying.
+                        outcome.not_found.push(id);
+                    }
                 }
             }
+        }
+        tx.commit()?;
 
-            // Update task status
-            self.conn.execute(
-                "UPDATE tasks SET status = 'closed', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
-                (&now, id),
+        Ok(outcome)
+    }
+
+    /// Add a tag to multiple tasks in a single transaction. Tags are compared
+    /// as exact comma-separated tokens (not substrings) so e.g. "ui" does not
+    /// match inside "build". Returns the updated tasks plus any ids that don't
+    /// exist.
+    pub fn batch_add_tag(&mut self, task_ids: &[i64], tag: &str) -> Result<(Vec<Task>, Vec<i64>)> {
+        let mut updated_tasks = Vec::new();
+        let mut not_found = Vec::new();
+        let now = chrono::Local::now().to_rfc3339();
+
+        let task_ids = dedupe_ids(task_ids);
+
+        // Read current tags before opening the transaction.
+        let mut current: Vec<(i64, Option<String>)> = Vec::with_capacity(task_ids.len());
+        for &id in &task_ids {
+            match self.get_task(id)? {
+                Some(task) => current.push((id, task.tags)),
+                None => not_found.push(id),
+            }
+        }
+
+        let tx = self.conn.transaction()?;
+        for (id, tags) in current {
+            let current_tags = tags.unwrap_or_default();
+            let existing_tokens: Vec<&str> = current_tags
+                .split(',')
+                .map(|t| t.trim())
+                .filter(|t| !t.is_empty())
+                .collect();
+
+            let new_tags = if existing_tokens.is_empty() {
+                tag.to_string()
+            } else if existing_tokens.iter().any(|t| *t == tag) {
+                current_tags // Tag already present as an exact token
+            } else {
+                format!("{}, {}", current_tags, tag)
+            };
+
+            tx.execute(
+                "UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3",
+                (&new_tags, &now, id),
             )?;
 
-            if let Ok(Some(task)) = self.get_task(id) {
-                if task.status == Status::Closed {
-                    closed_tasks.push(task);
-                }
+            if let Some(updated) = get_task_tx(&tx, id)? {
+                updated_tasks.push(updated);
             }
         }
+        tx.commit()?;
 
-        Ok(closed_tasks)
+        Ok((updated_tasks, not_found))
     }
 
-    pub fn batch_add_tag(&mut self, task_ids: &[i64], tag: &str) -> Result<Vec<Task>> {
-        let mut updated_tasks = Vec::new();
-        let now = chrono::Local::now().to_rfc3339();
-
-        for &id in task_ids {
-            if let Ok(Some(task)) = self.get_task(id) {
-                let current_tags = task.tags.unwrap_or_default();
-                let new_tags = if current_tags.is_empty() {
-                    tag.to_string()
-                } else if current_tags.contains(tag) {
-                    current_tags // Tag already exists
-                } else {
-                    format!("{}, {}", current_tags, tag)
-                };
-
-                self.conn.execute(
-                    "UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3",
-                    (&new_tags, &now, id),
-                )?;
-
-                if let Ok(Some(updated)) = self.get_task(id) {
-                    updated_tasks.push(updated);
-                }
-            }
-        }
-
-        Ok(updated_tasks)
-    }
-
+    /// Move multiple tasks to an epic (or clear the epic with `None`) in a
+    /// single transaction. Returns the updated tasks plus any ids that don't
+    /// exist (previously these were silently no-op'd by the UPDATE).
     pub fn batch_move_to_epic(
         &mut self,
         task_ids: &[i64],
         epic_id: Option<i64>,
-    ) -> Result<Vec<Task>> {
+    ) -> Result<(Vec<Task>, Vec<i64>)> {
         let mut updated_tasks = Vec::new();
+        let mut not_found = Vec::new();
         let now = chrono::Local::now().to_rfc3339();
 
         // Verify epic exists if specified
@@ -1030,18 +1165,26 @@ impl Database {
             }
         }
 
-        for &id in task_ids {
-            self.conn.execute(
+        let task_ids = dedupe_ids(task_ids);
+
+        let tx = self.conn.transaction()?;
+        for &id in &task_ids {
+            let changed = tx.execute(
                 "UPDATE tasks SET epic_id = ?1, updated_at = ?2 WHERE id = ?3",
                 (epic_id, &now, id),
             )?;
 
-            if let Ok(Some(updated)) = self.get_task(id) {
-                updated_tasks.push(updated);
+            if changed == 1 {
+                if let Some(updated) = get_task_tx(&tx, id)? {
+                    updated_tasks.push(updated);
+                }
+            } else {
+                not_found.push(id);
             }
         }
+        tx.commit()?;
 
-        Ok(updated_tasks)
+        Ok((updated_tasks, not_found))
     }
 
     // Task cloning

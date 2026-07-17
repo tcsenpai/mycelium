@@ -1,10 +1,31 @@
 use crate::error::Result;
 use rusqlite::Connection;
 
-// Latest schema version. Referenced by tests; the migration gate uses literal
-// version numbers, so this is documentation + a test anchor.
-#[allow(dead_code)]
-const CURRENT_VERSION: i32 = 6;
+/// Latest schema version this build migrates to.
+pub const CURRENT_VERSION: i32 = 6;
+
+/// Every application table this schema version is expected to have created.
+/// Single source of truth for tooling (e.g. `myc doctor`) that needs to verify
+/// the database structure without hard-coding a stale table list. Keep this in
+/// sync with the `CREATE TABLE` statements across `migrate_v1`..`migrate_v6`.
+pub const EXPECTED_TABLES: &[&str] = &[
+    "epics",
+    "assignees",
+    "tasks",
+    "dependencies",
+    "external_refs",
+    "task_notes",
+    "linear_sync",
+    "epic_notes",
+    "followups",
+];
+
+/// The schema version recorded in the database (MAX of the _migrations table),
+/// or 0 if the migrations table is absent/empty. Public so tools like `doctor`
+/// can compare against `CURRENT_VERSION` instead of hard-coding a value.
+pub fn schema_version(conn: &Connection) -> Result<i32> {
+    get_current_version(conn)
+}
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     create_migrations_table(conn)?;

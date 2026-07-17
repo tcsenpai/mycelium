@@ -1,9 +1,5 @@
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, INFO_PREFIX};
 use crate::error::Result;
-use crate::models::{Priority, Status};
-use colored::Colorize;
-use comfy_table::{ContentArrangement, Table};
 
 pub fn execute(
     epic_id: Option<i64>,

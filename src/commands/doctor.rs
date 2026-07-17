@@ -1,6 +1,4 @@
-use crate::commands::{
-    ensure_initialized, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX,
-};
+use crate::commands::{ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
 use crate::db::Database;
 use crate::error::Result;
 use colored::Colorize;
@@ -211,10 +209,14 @@ fn check_database_accessible() -> Result<CheckResult> {
         .join("mycelium.db");
 
     if !db_path.exists() {
+        // Not auto-fixable: silently creating an empty database here would
+        // mask what is usually a wrong working directory or a project that
+        // was never initialized, and `fix_database` used to do exactly that
+        // by calling `Database::open` (which creates-on-open).
         return Ok(CheckResult::error(
             "Database accessible",
-            "Database file not found",
-            true,
+            "Database file not found. Run `myc init`, or check that you're in the right directory.",
+            false,
         ));
     }
 
@@ -246,14 +248,7 @@ fn check_database_integrity() -> Result<CheckResult> {
             // Try to query each table to verify integrity
             let conn = db.get_conn();
 
-            let tables = [
-                "epics",
-                "tasks",
-                "assignees",
-                "dependencies",
-                "external_refs",
-            ];
-            for table in &tables {
+            for table in mycelium_core::db::EXPECTED_TABLES {
                 // Check if table exists by querying sqlite_master
                 let exists: bool = conn
                     .query_row(
@@ -320,12 +315,14 @@ fn check_orphaned_tasks() -> Result<CheckResult> {
         Ok(db) => {
             let conn = db.get_conn();
 
-            // Check for tasks with non-existent epic_id
+            // "Orphaned" in this codebase means a task with no epic assigned
+            // (epic_id IS NULL) — see Database::list_orphan_tasks. Tasks can't
+            // actually reference a deleted epic: the FK is
+            // `ON DELETE SET NULL`, so a dangling-FK check (the old query)
+            // could never fire and always reported zero orphans.
             let orphaned: i64 = conn
                 .query_row(
-                    "SELECT COUNT(*) FROM tasks t 
-                 LEFT JOIN epics e ON t.epic_id = e.id 
-                 WHERE t.epic_id IS NOT NULL AND e.id IS NULL",
+                    "SELECT COUNT(*) FROM tasks WHERE epic_id IS NULL",
                     [],
                     |row| row.get(0),
                 )
@@ -334,7 +331,10 @@ fn check_orphaned_tasks() -> Result<CheckResult> {
             if orphaned > 0 {
                 Ok(CheckResult::warning(
                     "Orphaned tasks",
-                    format!("{} task(s) reference non-existent epics", orphaned),
+                    format!(
+                        "{} task(s) have no epic assigned. Review with `myc task batch-op delete-orphans`.",
+                        orphaned
+                    ),
                 ))
             } else {
                 Ok(CheckResult::ok("Orphaned tasks", "No orphaned tasks found"))
@@ -364,10 +364,17 @@ fn check_circular_dependencies() -> Result<CheckResult> {
             for task in &tasks {
                 if let Ok(chain) = db.get_all_dependencies(task.id) {
                     if chain.all_dependencies.contains(&task.id) {
+                        // Not auto-fixable: breaking a dependency cycle requires
+                        // deciding which link to remove, which needs human
+                        // judgment. `fix_circular_deps` always returned Ok(false)
+                        // here, so `fixable: true` was a lie about the --fix path.
                         return Ok(CheckResult::error(
                             "Circular dependencies",
-                            format!("Task #{} has circular dependency", task.id),
-                            true,
+                            format!(
+                                "Task #{} has circular dependency. Resolve manually via `myc deps show {}` and `myc deps unlink <task_id> <blocked_task_id>`.",
+                                task.id, task.id
+                            ),
+                            false,
                         ));
                     }
                 }
@@ -450,23 +457,30 @@ fn check_schema_version() -> Result<CheckResult> {
         ));
     }
 
+    // Note: opening the DB runs migrations, so a healthy path is normally
+    // already current here. We still compare the recorded version against the
+    // build's latest so a genuinely stuck/downgraded schema is reported, and we
+    // report the ACTUAL version instead of a hard-coded one.
     match Database::open(&db_path) {
-        Ok(db) => {
-            let conn = db.get_conn();
-
-            // Check if we can query the tags column (schema v2)
-            match conn.execute("SELECT tags FROM tasks LIMIT 1", []) {
-                Ok(_) => Ok(CheckResult::ok(
-                    "Schema version",
-                    "Database schema is up to date (v2)",
-                )),
-                Err(_) => Ok(CheckResult::error(
-                    "Schema version",
-                    "Database schema is outdated. Missing 'tags' column.",
-                    true,
-                )),
-            }
-        }
+        Ok(db) => match db.schema_version() {
+            Ok(version) if version >= mycelium_core::db::LATEST_SCHEMA_VERSION => Ok(CheckResult::ok(
+                "Schema version",
+                format!("Database schema is up to date (v{version})"),
+            )),
+            Ok(version) => Ok(CheckResult::error(
+                "Schema version",
+                format!(
+                    "Database schema is outdated (v{version}, expected v{}). Run `myc doctor --fix`.",
+                    mycelium_core::db::LATEST_SCHEMA_VERSION
+                ),
+                true,
+            )),
+            Err(e) => Ok(CheckResult::error(
+                "Schema version",
+                format!("Cannot read schema version: {}", e),
+                false,
+            )),
+        },
         Err(e) => Ok(CheckResult::error(
             "Schema version",
             format!("Cannot check: {}", e),
@@ -480,7 +494,6 @@ fn try_fix(check_name: &str) -> Result<bool> {
         "Database accessible" => fix_database(),
         "Gitignore" => fix_gitignore(),
         "Schema version" => fix_schema(),
-        "Circular dependencies" => fix_circular_deps(),
         _ => Ok(false),
     }
 }
@@ -491,7 +504,15 @@ fn fix_database() -> Result<bool> {
         .join(".mycelium")
         .join("mycelium.db");
 
-    // Try to recreate the database
+    // Never silently create a database here: `Database::open` creates the
+    // file if it's missing, which would mask data loss (wrong cwd, deleted
+    // db, uninitialized project) as a "Fixed" checkmark. This check is no
+    // longer marked fixable, but guard defensively in case it's ever called
+    // directly.
+    if !db_path.exists() {
+        return Ok(false);
+    }
+
     Database::open(&db_path)?;
     Ok(true)
 }
@@ -529,12 +550,10 @@ fn fix_schema() -> Result<bool> {
     // Re-run migrations
     db.migrate()?;
 
-    Ok(true)
-}
-
-fn fix_circular_deps() -> Result<bool> {
-    // For circular deps, we'd need to break the cycle
-    // This is complex and might need user input
-    // For now, just report that it needs manual intervention
-    Ok(false)
+    // Verify the migration actually landed instead of unconditionally
+    // reporting success: migrate() can no-op or partially apply if a
+    // migration step silently fails to raise, so re-read the recorded
+    // version and only claim success if it's truly current.
+    let version = db.schema_version()?;
+    Ok(version >= mycelium_core::db::LATEST_SCHEMA_VERSION)
 }

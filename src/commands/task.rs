@@ -158,9 +158,9 @@ pub fn list(
 /// Print tasks in a tree view when dependencies exist
 fn print_tree_view(
     tasks: &[crate::models::Task],
-    epic_map: &HashMap<i64, Epic>,
+    _epic_map: &HashMap<i64, Epic>,
     deps: &HashMap<i64, (Vec<i64>, Vec<i64>)>,
-    db: &crate::db::Database,
+    _db: &crate::db::Database,
 ) -> Result<()> {
     use std::collections::HashSet;
 
@@ -1289,40 +1289,62 @@ pub fn batch_close(task_ids: &[i64], force: bool, quiet: bool) -> Result<()> {
     }
 
     let mut db = ensure_initialized()?;
-    let closed_tasks = db.batch_close_tasks(task_ids, force)?;
-
-    let skipped_count = task_ids.len() - closed_tasks.len();
+    let outcome = db.batch_close_tasks(task_ids, force)?;
 
     if !quiet {
-        if closed_tasks.is_empty() {
-            if skipped_count > 0 && !force {
-                println!(
-                    "{} No tasks closed. {} task(s) may be blocked (use --force to override).",
-                    INFO_PREFIX.blue(),
-                    skipped_count
-                );
-            } else {
-                println!("{} No tasks were closed.", INFO_PREFIX.blue());
-            }
+        if outcome.closed.is_empty() {
+            println!("{} No tasks closed.", INFO_PREFIX.blue());
         } else {
             println!(
                 "{} Closed {} task(s)",
                 SUCCESS_PREFIX.green(),
-                closed_tasks.len()
+                outcome.closed.len()
             );
-            for task in &closed_tasks {
+            for task in &outcome.closed {
                 println!("  - #{}: {}", task.id, task.title);
             }
-            if skipped_count > 0 && !force {
-                println!(
-                    "\n{} Skipped {} blocked task(s) (use --force to override)",
-                    INFO_PREFIX.blue(),
-                    skipped_count
-                );
-            }
-            if !closed_tasks.is_empty() {
-                crate::commands::followup::print_close_hint();
-            }
+        }
+
+        if !outcome.blocked.is_empty() {
+            let ids = outcome
+                .blocked
+                .iter()
+                .map(|id| format!("#{}", id))
+                .collect::<Vec<_>>()
+                .join(" ");
+            println!(
+                "{} Skipped {} blocked task(s) (use --force): {}",
+                INFO_PREFIX.blue(),
+                outcome.blocked.len(),
+                ids
+            );
+        }
+
+        if !outcome.already_closed.is_empty() {
+            println!(
+                "{} {} task(s) already closed",
+                INFO_PREFIX.blue(),
+                outcome.already_closed.len()
+            );
+        }
+
+        if !outcome.not_found.is_empty() {
+            let ids = outcome
+                .not_found
+                .iter()
+                .map(|id| format!("#{}", id))
+                .collect::<Vec<_>>()
+                .join(" ");
+            println!(
+                "{} {} not found: {}",
+                WARNING_PREFIX.yellow(),
+                outcome.not_found.len(),
+                ids
+            );
+        }
+
+        if !outcome.closed.is_empty() {
+            crate::commands::followup::print_close_hint();
         }
     }
 
@@ -1336,7 +1358,7 @@ pub fn batch_tag(tag: &str, task_ids: &[i64], quiet: bool) -> Result<()> {
     }
 
     let mut db = ensure_initialized()?;
-    let updated_tasks = db.batch_add_tag(task_ids, tag)?;
+    let (updated_tasks, not_found) = db.batch_add_tag(task_ids, tag)?;
 
     if !quiet {
         println!(
@@ -1347,6 +1369,19 @@ pub fn batch_tag(tag: &str, task_ids: &[i64], quiet: bool) -> Result<()> {
         );
         for task in &updated_tasks {
             println!("  - #{}: {}", task.id, task.title);
+        }
+        if !not_found.is_empty() {
+            let ids = not_found
+                .iter()
+                .map(|id| format!("#{}", id))
+                .collect::<Vec<_>>()
+                .join(" ");
+            println!(
+                "{} Skipped {} not found: {}",
+                WARNING_PREFIX.yellow(),
+                not_found.len(),
+                ids
+            );
         }
     }
 
@@ -1374,7 +1409,7 @@ pub fn batch_move(epic_id: i64, task_ids: &[i64], quiet: bool) -> Result<()> {
         "No Epic".to_string()
     };
 
-    let updated_tasks = db.batch_move_to_epic(task_ids, epic_id_opt)?;
+    let (updated_tasks, not_found) = db.batch_move_to_epic(task_ids, epic_id_opt)?;
 
     if !quiet {
         println!(
@@ -1385,6 +1420,19 @@ pub fn batch_move(epic_id: i64, task_ids: &[i64], quiet: bool) -> Result<()> {
         );
         for task in &updated_tasks {
             println!("  - #{}: {}", task.id, task.title);
+        }
+        if !not_found.is_empty() {
+            let ids = not_found
+                .iter()
+                .map(|id| format!("#{}", id))
+                .collect::<Vec<_>>()
+                .join(" ");
+            println!(
+                "{} Skipped {} not found: {}",
+                WARNING_PREFIX.yellow(),
+                not_found.len(),
+                ids
+            );
         }
     }
 

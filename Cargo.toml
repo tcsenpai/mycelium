@@ -3,7 +3,7 @@ members = ["mycelium-core"]
 
 [package]
 name = "mycelium-manager"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 authors = ["Mycelium Contributors"]
 description = "A robust, production-grade task/plan manager CLI (binary: myc)"
@@ -53,6 +53,7 @@ url = "2.5"
 toml = "0.8"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 sha2 = "0.10"
+csv = "1.3"
 
 [dev-dependencies]
 tempfile = "3.14"

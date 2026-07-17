@@ -1,5 +1,5 @@
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX};
+use crate::commands::{ensure_initialized, INFO_PREFIX, SUCCESS_PREFIX};
 use crate::error::Result;
 use crate::models::Status;
 use colored::Colorize;

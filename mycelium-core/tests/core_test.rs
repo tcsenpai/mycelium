@@ -220,6 +220,18 @@ fn active_dependencies_exclude_closed_blockers() {
 }
 
 #[test]
+fn fresh_db_reports_latest_schema_version() {
+    // Regression for a doctor bug that hard-coded "v2": a freshly-migrated DB
+    // must report the current schema version, matching LATEST_SCHEMA_VERSION.
+    let db = db();
+    assert_eq!(
+        db.schema_version().unwrap(),
+        mycelium_core::db::LATEST_SCHEMA_VERSION
+    );
+    assert!(mycelium_core::db::LATEST_SCHEMA_VERSION >= 6);
+}
+
+#[test]
 fn priority_serde_roundtrip() {
     for (p, s) in [
         (Priority::Low, "\"low\""),
@@ -231,4 +243,219 @@ fn priority_serde_roundtrip() {
         let back: Priority = serde_json::from_str(s).unwrap();
         assert_eq!(back, p);
     }
+}
+
+#[test]
+fn batch_close_reports_every_outcome_bucket() {
+    // Regression for a doctor/batch-close bug: in_progress tasks never
+    // closed (UPDATE only matched status='open'), already-closed tasks were
+    // silently re-counted as newly closed, and blocked-vs-missing were
+    // conflated. Exercise one task in each state and assert each lands in
+    // the right outcome bucket.
+    let mut db = db();
+
+    let open_task = db
+        .create_task(
+            "Open task",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let in_progress_task = db
+        .create_task(
+            "In progress task",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    db.update_task(
+        in_progress_task.id,
+        None,
+        None,
+        Some(Status::InProgress),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let already_closed_task = db
+        .create_task(
+            "Already closed",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    db.update_task(
+        already_closed_task.id,
+        None,
+        None,
+        Some(Status::Closed),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let blocked_task = db
+        .create_task(
+            "Blocked task",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let blocker_task = db
+        .create_task(
+            "Blocker (stays open)",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    db.add_dependency(blocked_task.id, blocker_task.id).unwrap();
+
+    let nonexistent_id = 999_999;
+
+    let ids = [
+        open_task.id,
+        in_progress_task.id,
+        already_closed_task.id,
+        blocked_task.id,
+        nonexistent_id,
+    ];
+
+    let outcome = db.batch_close_tasks(&ids, false).unwrap();
+
+    let closed_ids: Vec<i64> = outcome.closed.iter().map(|t| t.id).collect();
+    assert!(closed_ids.contains(&open_task.id), "open task should close");
+    assert!(
+        closed_ids.contains(&in_progress_task.id),
+        "in_progress task should close too (was previously skipped)"
+    );
+    assert_eq!(outcome.closed.len(), 2);
+
+    assert_eq!(outcome.already_closed, vec![already_closed_task.id]);
+    assert_eq!(outcome.blocked, vec![blocked_task.id]);
+    assert_eq!(outcome.not_found, vec![nonexistent_id]);
+
+    // The blocker itself and the already-closed task are untouched.
+    assert_eq!(
+        db.get_task(blocked_task.id).unwrap().unwrap().status,
+        Status::Open
+    );
+    assert_eq!(
+        db.get_task(already_closed_task.id).unwrap().unwrap().status,
+        Status::Closed
+    );
+
+    // force=true should now close the previously-blocked task.
+    let forced = db.batch_close_tasks(&[blocked_task.id], true).unwrap();
+    assert_eq!(forced.closed.len(), 1);
+    assert_eq!(forced.closed[0].id, blocked_task.id);
+}
+
+#[test]
+fn batch_add_tag_dedupes_exact_tokens_not_substrings() {
+    // Regression: `current_tags.contains(tag)` matched "ui" inside "build",
+    // silently refusing to add a distinct tag. Comparison must be over exact
+    // comma-separated tokens.
+    let mut db = db();
+    let task = db
+        .create_task(
+            "Task",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            Some("build"),
+            None,
+            None,
+        )
+        .unwrap();
+    let missing_id = 424242;
+
+    let (updated, not_found) = db.batch_add_tag(&[task.id, missing_id], "ui").unwrap();
+
+    assert_eq!(updated.len(), 1);
+    let tags = updated[0].tags.clone().unwrap();
+    let tokens: Vec<&str> = tags.split(',').map(|t| t.trim()).collect();
+    assert!(
+        tokens.contains(&"ui"),
+        "expected 'ui' tag to be added: {tags}"
+    );
+    assert!(tokens.contains(&"build"));
+    assert_eq!(not_found, vec![missing_id]);
+
+    // Adding the same tag again must not duplicate it.
+    let (updated_again, _) = db.batch_add_tag(&[task.id], "ui").unwrap();
+    let tags_again = updated_again[0].tags.clone().unwrap();
+    let count = tags_again.split(',').filter(|t| t.trim() == "ui").count();
+    assert_eq!(count, 1, "tag must not be duplicated: {tags_again}");
+}
+
+#[test]
+fn batch_close_dedupes_repeated_ids() {
+    // A repeated id must be acted on and reported exactly once, not
+    // mis-bucketed into not_found on its second occurrence.
+    let mut db = db();
+    let t = db
+        .create_task(
+            "T",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let outcome = db.batch_close_tasks(&[t.id, t.id], false).unwrap();
+    assert_eq!(outcome.closed.len(), 1, "closed once");
+    assert!(
+        outcome.not_found.is_empty(),
+        "no phantom not_found from the dup"
+    );
+    assert!(outcome.already_closed.is_empty());
 }

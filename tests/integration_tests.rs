@@ -422,6 +422,91 @@ fn test_export() {
 }
 
 #[test]
+fn test_export_csv_survives_commas_quotes_and_newlines() {
+    // Regression: the old CSV export hand-rolled `"{}"` interpolation, which
+    // only escaped embedded quotes. A title/description containing a literal
+    // newline produced an extra, broken CSV row; commas inside unescaped
+    // fields (assignee/epic ids are safe, but nothing quoted them either)
+    // could also misalign columns for any consumer that (correctly) treats
+    // an unescaped raw newline as a row terminator.
+    let temp = TempDir::new().unwrap();
+    myc_cmd(&temp).arg("init").output().expect("Failed to init");
+    myc_cmd(&temp)
+        .arg("epic")
+        .arg("create")
+        .arg("--title")
+        .arg("Test Epic")
+        .output()
+        .expect("Failed to create epic");
+
+    let tricky_title = "Title, with \"quotes\"\nand a newline";
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg(tricky_title)
+        .arg("--epic")
+        .arg("1")
+        .output()
+        .expect("Failed to create tricky task");
+    myc_cmd(&temp)
+        .arg("task")
+        .arg("create")
+        .arg("--title")
+        .arg("Plain task")
+        .output()
+        .expect("Failed to create plain task");
+
+    let output = myc_cmd(&temp)
+        .arg("export")
+        .arg("csv")
+        .output()
+        .expect("Failed to export csv");
+    print_output(&output);
+    assert!(output.status.success());
+
+    let mut rdr = csv::Reader::from_reader(output.stdout.as_slice());
+    let headers = rdr.headers().expect("headers").clone();
+    assert_eq!(
+        headers.iter().collect::<Vec<_>>(),
+        vec![
+            "id",
+            "title",
+            "description",
+            "status",
+            "priority",
+            "epic_id",
+            "assignee_id",
+            "due_date",
+            "tags",
+            "notes",
+            "user_info",
+            "agent_questions",
+            "created_at",
+            "updated_at",
+        ]
+    );
+
+    let records: Vec<csv::StringRecord> =
+        rdr.records().map(|r| r.expect("valid csv row")).collect();
+    // Exactly 2 data rows despite the embedded newline in row 1.
+    assert_eq!(records.len(), 2, "expected 2 task rows, got {records:?}");
+
+    let tricky_row = records
+        .iter()
+        .find(|r| r.get(0) == Some("1"))
+        .expect("row for task #1");
+    assert_eq!(tricky_row.get(1), Some(tricky_title));
+    assert_eq!(tricky_row.get(5), Some("1")); // epic_id
+
+    let plain_row = records
+        .iter()
+        .find(|r| r.get(0) == Some("2"))
+        .expect("row for task #2");
+    assert_eq!(plain_row.get(1), Some("Plain task"));
+}
+
+#[test]
 fn test_task_create_help_does_not_panic() {
     let temp = TempDir::new().unwrap();
     let output = myc_cmd(&temp)
