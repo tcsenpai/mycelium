@@ -2,18 +2,26 @@ use clap::Parser;
 
 mod cli;
 mod commands;
-mod db;
-mod error;
 mod linear;
-mod models;
+
+// Data layer now lives in the shared `mycelium-core` crate. Re-export the
+// modules under the old paths so the CLI code (crate::db / crate::models /
+// crate::error) keeps working unchanged.
+pub use mycelium_core::{db, error, models};
 
 use cli::{
     AssigneeCommands, BatchOpCommands, Cli, Commands, DepsCommands, EpicCommands, ExportCommands,
     FollowupCommands, LinearCommands, LinkCommands, TaskCommands,
 };
-use error::handle_error;
 
 pub use commands::{ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
+
+/// Print an error and exit. Lives in the CLI binary (not core) because it does
+/// terminal I/O and process exit.
+fn handle_error(err: error::MyceliumError) -> ! {
+    eprintln!("{} {}", ERROR_PREFIX, err);
+    std::process::exit(1);
+}
 
 fn main() {
     let cli = Cli::parse();

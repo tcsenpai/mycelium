@@ -36,3 +36,14 @@ publish.sh
 /.mycelium/
 /mycui/plan-ui.md
 /mycui/plan.md
+
+# Separate web experiment, not part of this repo's build
+/mycelium-web/
+
+# phi supply-chain audit reports
+**/phi-report.json
+.token-savior-cache.json
+
+# Icon source masters (deliverables live in assets/ and mycui/src-tauri/icons/)
+/1.png
+/2.png
