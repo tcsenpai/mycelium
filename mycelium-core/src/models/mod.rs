@@ -1,4 +1,3 @@
-use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -76,7 +75,7 @@ impl Priority {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Status {
     Open,
     InProgress,
@@ -126,10 +125,12 @@ impl Status {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum ExternalRefType {
+    #[serde(rename = "github-issue")]
     GitHubIssue,
+    #[serde(rename = "github-pr")]
     GitHubPr,
+    #[serde(rename = "url")]
     Url,
 }
 

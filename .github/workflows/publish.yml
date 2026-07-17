@@ -1,0 +1,66 @@
+name: Publish to crates.io
+
+# Publishes the crates to crates.io on a version tag. mycelium-core must be
+# published BEFORE mycelium-manager (myc depends on it), and myc must wait for
+# the new core version to appear in the crates.io index before it can build.
+#
+# Requires the CARGO_REGISTRY_TOKEN repository secret (crates.io API token).
+# Manual trigger (workflow_dispatch) is also allowed so a failed core-vs-myc
+# race can be re-run without re-tagging.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: cargo publish (core, then myc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish mycelium-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # --no-verify is safe here (CI already builds/tests on ci.yml).
+          # Tolerate "already uploaded" so a re-run after a myc failure doesn't
+          # abort on the core step.
+          if cargo publish -p mycelium-core 2>&1 | tee /tmp/core.log; then
+            echo "core published"
+          elif grep -q "already exists" /tmp/core.log; then
+            echo "core version already on crates.io — continuing"
+          else
+            exit 1
+          fi
+
+      - name: Wait for mycelium-core to appear in the index
+        run: |
+          # crates.io index propagation is not instant; myc's publish will fail
+          # with "no matching package" until core is queryable. Poll a bit.
+          for i in $(seq 1 30); do
+            if cargo search mycelium-core 2>/dev/null | grep -q '^mycelium-core '; then
+              echo "core is queryable"
+              exit 0
+            fi
+            echo "waiting for core in index ($i/30)..."
+            sleep 10
+          done
+          echo "core did not appear in index in time" >&2
+          exit 1
+
+      - name: Publish mycelium-manager (myc)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if cargo publish -p mycelium-manager 2>&1 | tee /tmp/myc.log; then
+            echo "myc published"
+          elif grep -q "already exists" /tmp/myc.log; then
+            echo "myc version already on crates.io — nothing to do"
+          else
+            exit 1
+          fi

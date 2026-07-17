@@ -1,6 +1,9 @@
 use crate::error::Result;
 use rusqlite::Connection;
 
+// Latest schema version. Referenced by tests; the migration gate uses literal
+// version numbers, so this is documentation + a test anchor.
+#[allow(dead_code)]
 const CURRENT_VERSION: i32 = 6;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
