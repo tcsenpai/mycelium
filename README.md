@@ -4,7 +4,17 @@
 
 # Mycelium
 
-A robust, production-grade task/plan manager CLI designed for reliability, agent usage, and git-trackable project management.
+**A task manager built for coding agents.** Mycelium gives an AI agent
+(Claude Code, Cursor, Aider, or your own) a durable, git-trackable place to
+plan and remember work across sessions. State lives in a SQLite file inside
+your repo, so when an agent's context is cleared, a session ends, or a
+teammate pulls the branch three days later, the plan is still there: the same
+epics, tasks, dependencies, and open follow-ups. The agent reconstructs where
+it left off from `myc list`, not from your memory.
+
+It is a one-shot, scriptable CLI with JSON output and a zero-config data model,
+which is exactly what an agent needs to drive it reliably. Humans get the same
+tool (plus an optional desktop GUI, [MycUI](#gui-mycui-pre-built-download)).
 
 [![crates.io](https://img.shields.io/crates/v/mycelium-manager.svg)](https://crates.io/crates/mycelium-manager)
 [![docs.rs](https://img.shields.io/docsrs/mycelium-manager)](https://docs.rs/mycelium-manager)
@@ -16,21 +26,93 @@ A robust, production-grade task/plan manager CLI designed for reliability, agent
   <img src="assets/demo.gif" alt="Mycelium CLI demo" width="800">
 </p>
 
+## Why agents
+
+- **State that outlives the session**: the plan is a file in the repo
+  (`.mycelium/mycelium.db`), not the agent's context window. Clear the context,
+  start a new session, or hand the branch to another machine, and the epics,
+  tasks, dependencies, and follow-ups are still intact.
+- **Git is the sync layer**: commit `.mycelium/` and the plan travels with the
+  code. A teammate (or agent) who pulls the branch inherits the exact same
+  task graph. No server, no account, no external service.
+- **One-shot and scriptable**: every command is a single non-interactive
+  invocation with `--format json` and `--quiet` for clean parsing. An agent
+  drives it without a REPL or a session to manage.
+- **A drop-in agent contract**: `myc init` writes an `AGENTS.md` describing the
+  workflow, so the agent knows how to use the tool without you explaining it.
+  Follow-ups let it jot "oh-by-the-way" findings mid-task without derailing.
+- **Blocking that means something**: dependency links with cycle detection, so
+  an agent can't close a task whose blockers are still open.
+
+## How it works in practice
+
+A walkthrough of a real agent session in a repo.
+
+**1. Setup: the agent gets its instructions.** Running `myc init` (once, per
+project) writes an `AGENTS.md` into the repo describing the whole workflow:
+the commands, the data model, and the rules (e.g. "every task belongs to an
+epic", "surface open follow-ups before wrapping up"). Agents like Claude Code
+read `AGENTS.md` automatically, so the tool is self-documenting and you never
+have to explain `myc` to the agent.
+
+**2. During work: the agent tracks as it goes.** You ask the agent to build a
+feature. It decomposes the work into the plan, right in the repo:
+
+```bash
+myc epic create --title "Auth" --description "Login + sessions"
+myc task create --title "Password login" --epic 1 --priority high
+myc task create --title "Session middleware" --epic 1
+myc task link blocks --task 2 3       # sessions depend on login
+myc task update 2 --status in_progress
+```
+
+Mid-task it notices something unrelated and jots it down without losing focus,
+using the lightweight **follow-ups** scratchpad:
+
+```bash
+myc followup add "TODO: rotate the JWT secret, it's hardcoded in config.rs"
+```
+
+**3. Wrap-up: nothing gets silently dropped.** When the agent finishes, an
+optional [Claude Code](https://docs.claude.com/en/docs/claude-code) **Stop
+hook** (shipped in `hooks/`) fires and checks for open follow-ups. If any
+exist, it feeds them back to the agent, which surfaces them to you instead of
+ending the turn as if everything were done:
+
+> Before we wrap, 1 open follow-up: "rotate the JWT secret, hardcoded in
+> config.rs". Want me to handle it now, or leave it for later?
+
+The hook self-gates: it stays silent outside mycelium projects and only fires
+when there's actually something open, so it never nags.
+
+**4. Next session: the state is still there.** Days later, a fresh agent
+session (cleared context, or a teammate on another machine who pulled the
+branch) starts by reading the plan back, not by asking you what happened:
+
+```bash
+myc list                 # the Auth epic, its tasks, "Session middleware [blocked by #2]"
+myc followup list -o     # the JWT-secret note is still waiting
+```
+
+It resumes exactly where the last session left off. The plan lived in
+`.mycelium/mycelium.db` and travelled with the code through git.
+
 ## Features
 
-- **Single Binary**: Statically compiled, no dependencies
-- **Git-Trackable**: SQLite storage designed for version control
+- **Agent-Optimized**: One-shot CLI, `--format json`, `--quiet`, `AGENTS.md` contract
+- **State Persistence**: Plan survives context resets; reconstructable from `myc list`
+- **Git-Trackable**: SQLite storage designed for version control and branch sync
 - **Dependency Management**: Task blocking with cycle detection
+- **Follow-ups**: Lightweight scratch table for non-blocking items captured mid-work
+- **Smart List View**: Tree visualization for dependencies, epic grouping for simple lists
 - **Assignees**: Local assignees with GitHub username linking
 - **External References**: Link tasks to GitHub issues/PRs and URLs
-- **Agent-Optimized**: One-shot CLI with JSON output support
-- **Fast**: Sub-100ms response time for typical operations
-- **Safe**: Comprehensive error handling and validation
-- **Smart List View**: Tree visualization for dependencies, epic grouping for simple lists
 - **Task Notes**: Add comments and notes to tasks
 - **Task Cloning**: Duplicate tasks with all metadata
 - **Batch Operations**: Close, tag, or move multiple tasks at once
-- **Follow-ups**: Lightweight scratch table for non-blocking items captured mid-work
+- **Single Binary**: Statically compiled, no dependencies
+- **Fast**: Sub-100ms response time for typical operations
+- **Safe**: Comprehensive error handling and validation
 
 ## Installation
 
@@ -336,7 +418,28 @@ git commit -m "Add mycelium project tracking"
 
 ## For AI Agents
 
-Mycelium is optimized for agentic workflows:
+Mycelium is optimized for agentic workflows.
+
+**The resume pattern.** At the start of a task, the agent reads its own
+prior plan instead of relying on the context window:
+
+```bash
+myc list --format json        # what's the current task graph?
+myc task list --blocked       # what's stuck?
+myc followup list -o          # any open "oh-by-the-way" items from last time?
+```
+
+At the end, it records state that will still be there next session:
+
+```bash
+myc task update 4 --status closed
+myc followup add "auth tests are flaky under load, investigate"
+```
+
+Across a context reset or a fresh session on the same branch, the plan is
+unchanged and the agent picks up exactly where it left off.
+
+**Everyday commands:**
 
 ```bash
 # Use --quiet to get just IDs
