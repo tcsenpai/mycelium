@@ -1918,7 +1918,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mycelium-core"
+name = "mycelium-manager-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -1935,7 +1935,7 @@ version = "0.2.0"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
- "mycelium-core",
+ "mycelium-manager-core",
  "rusqlite",
  "serde",
  "serde_json",

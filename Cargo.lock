@@ -1011,18 +1011,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mycelium-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "mycelium-manager"
 version = "0.2.5"
 dependencies = [
@@ -1033,7 +1021,7 @@ dependencies = [
  "colored",
  "comfy-table",
  "directories",
- "mycelium-core",
+ "mycelium-manager-core",
  "predicates",
  "regex",
  "reqwest",
@@ -1045,6 +1033,18 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "url",
+]
+
+[[package]]
+name = "mycelium-manager-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [package]
-name = "mycelium-core"
+name = "mycelium-manager-core"
 version = "0.1.0"
 edition = "2021"
 authors = ["Mycelium Contributors"]
@@ -7,6 +7,12 @@ description = "Shared data layer (db, models, migrations, errors) for the Myceli
 license = "MIT"
 repository = "https://github.com/tcsenpai/mycelium"
 rust-version = "1.75"
+
+# The crates.io package name is `mycelium-manager-core` (mycelium-core /
+# mycelium_core were already taken on crates.io). The LIBRARY name stays
+# `mycelium_core` so `use mycelium_core::...` in the CLI and MycUI is unchanged.
+[lib]
+name = "mycelium_core"
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }

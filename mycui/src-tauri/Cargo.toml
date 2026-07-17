@@ -14,7 +14,7 @@ rust-version = "1.75"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-mycelium-core = { path = "../../mycelium-core" }
+mycelium-manager-core = { path = "../../mycelium-core" }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
