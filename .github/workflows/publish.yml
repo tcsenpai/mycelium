@@ -7,11 +7,22 @@ name: Publish to crates.io
 # Requires the CARGO_REGISTRY_TOKEN repository secret (crates.io API token).
 # Manual trigger (workflow_dispatch) is also allowed so a failed core-vs-myc
 # race can be re-run without re-tagging.
+#
+# This workflow shares the `v*` trigger with release.yml, which builds the MycUI
+# desktop bundles. Changes confined to mycui/ (excluded from the crate) need a
+# tag to ship the app but must not force a crate release, so the preflight below
+# skips publishing entirely when both crate versions are already on crates.io.
+# Set the `force_publish` input on a manual run to publish regardless.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      force_publish:
+        description: "Publish even if the version is already on crates.io"
+        type: boolean
+        default: false
 
 jobs:
   publish:
@@ -23,7 +34,60 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Decide up front whether there is anything to publish. Asking the sparse
+      # index is authoritative and cheap; the alternative is inferring it from
+      # the text of a cargo publish failure, which breaks if crates.io reworks
+      # its error strings.
+      - name: Check whether these versions are already published
+        id: preflight
+        run: |
+          set -euo pipefail
+
+          crate_version() {
+            grep -m1 '^version' "$1" | sed -E 's/version = "([^"]+)"/\1/'
+          }
+
+          # Sparse-index paths shard on name length: 1/2/3 chars get special
+          # prefixes, 4+ use the first two pairs of characters.
+          index_path() {
+            name="$1"
+            case ${#name} in
+              1) echo "1/$name" ;;
+              2) echo "2/$name" ;;
+              3) echo "3/${name:0:1}/$name" ;;
+              *) echo "${name:0:2}/${name:2:2}/$name" ;;
+            esac
+          }
+
+          published() {
+            name="$1"; ver="$2"
+            url="https://index.crates.io/$(index_path "$name")"
+            # A brand-new crate 404s; treat that as "not published".
+            body=$(curl -sf "$url") || return 1
+            echo "$body" | grep -q "\"vers\":\"${ver}\""
+          }
+
+          core_ver=$(crate_version mycelium-core/Cargo.toml)
+          myc_ver=$(crate_version Cargo.toml)
+          echo "core version: $core_ver"
+          echo "myc version:  $myc_ver"
+
+          core_done=false; myc_done=false
+          published mycelium-manager-core "$core_ver" && core_done=true
+          published mycelium-manager "$myc_ver" && myc_done=true
+          echo "core already published: $core_done"
+          echo "myc already published:  $myc_done"
+
+          forced="${{ github.event.inputs.force_publish || 'false' }}"
+          if [ "$core_done" = true ] && [ "$myc_done" = true ] && [ "$forced" != "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::core $core_ver and myc $myc_ver are already on crates.io; skipping publish. This is expected for tags that only ship MycUI. Bump the versions, or re-run with force_publish, to publish."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish mycelium-manager-core
+        if: steps.preflight.outputs.skip != 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
@@ -38,6 +102,7 @@ jobs:
           fi
 
       - name: Wait for mycelium-manager-core in the sparse index
+        if: steps.preflight.outputs.skip != 'true'
         run: |
           # cargo publish resolves deps from the SPARSE index (index.crates.io),
           # which updates within ~a minute — much faster/more reliable than the
@@ -56,6 +121,7 @@ jobs:
           exit 1
 
       - name: Publish mycelium-manager (myc)
+        if: steps.preflight.outputs.skip != 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
