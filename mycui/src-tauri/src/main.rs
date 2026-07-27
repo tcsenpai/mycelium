@@ -195,6 +195,127 @@ async fn get_current_db_path(
     Ok(path.as_ref().map(|p| p.to_string_lossy().to_string()))
 }
 
+/// Locate the `claude` CLI. A GUI app launched from Finder/Dock does not
+/// inherit the shell's PATH, so `Command::new("claude")` fails there even
+/// though it works when the app is started from a terminal.
+fn resolve_claude_binary() -> Option<std::path::PathBuf> {
+    if let Ok(explicit) = std::env::var("CLAUDE_BINARY") {
+        let path = std::path::PathBuf::from(explicit);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join("claude");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // Common install locations, for the Finder-launch case above.
+    let mut fallbacks: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        fallbacks.push(home.join(".local/bin/claude"));
+        fallbacks.push(home.join(".claude/local/claude"));
+        fallbacks.push(home.join(".bun/bin/claude"));
+        fallbacks.push(home.join(".npm-global/bin/claude"));
+    }
+    fallbacks.push(std::path::PathBuf::from("/opt/homebrew/bin/claude"));
+    fallbacks.push(std::path::PathBuf::from("/usr/local/bin/claude"));
+
+    fallbacks.into_iter().find(|p| p.is_file())
+}
+
+#[tauri::command]
+async fn claude_available() -> Result<bool, String> {
+    Ok(resolve_claude_binary().is_some())
+}
+
+/// Run a one-shot `claude -p` query. The prompt (project context + question)
+/// is written to stdin rather than passed as an argument: task titles are
+/// arbitrary user text, and putting them in argv risks hitting the platform
+/// argument-length limit on large projects.
+#[tauri::command]
+async fn ask_claude(prompt: String, model: Option<String>) -> Result<String, String> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
+    let binary = resolve_claude_binary()
+        .ok_or_else(|| "claude CLI not found. Install Claude Code, or set CLAUDE_BINARY to its full path.".to_string())?;
+
+    let mut command = tokio::process::Command::new(binary);
+    command.arg("-p");
+    // Read-only by construction. The chat answers questions about project data
+    // that is already embedded in the prompt, so it never needs to touch the
+    // filesystem or run commands. `--tools ""` disables the whole built-in set
+    // (Read/Edit/Write/Bash/...), and `dontAsk` guarantees a headless process
+    // can't be silently granted anything: with no TTY there is nobody to
+    // approve a prompt, so any tool request fails closed instead of hanging.
+    // Verified: asking it to write a file or run `touch` under these flags
+    // produces a refusal and leaves the filesystem untouched.
+    command.arg("--tools").arg("");
+    command.arg("--permission-mode").arg("dontAsk");
+    if let Some(model) = model.as_deref().filter(|m| !m.is_empty()) {
+        command.arg("--model").arg(model);
+    }
+    // Defence in depth: run outside the project tree so that even if a future
+    // change re-enables a tool, the CLI's default working directory is not the
+    // user's repo.
+    if let Some(temp) = std::env::temp_dir().to_str() {
+        command.current_dir(temp);
+    }
+
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("failed to start claude: {e}"))?;
+
+    // Drop stdin after writing so claude sees EOF and starts work.
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "failed to open claude stdin".to_string())?;
+        stdin
+            .write_all(prompt.as_bytes())
+            .await
+            .map_err(|e| format!("failed to send prompt: {e}"))?;
+        stdin
+            .shutdown()
+            .await
+            .map_err(|e| format!("failed to close prompt stream: {e}"))?;
+    }
+
+    // Bound the call so a hung CLI can't wedge the chat panel forever.
+    let output = tokio::time::timeout(Duration::from_secs(180), child.wait_with_output())
+        .await
+        .map_err(|_| "claude timed out after 180s".to_string())?
+        .map_err(|e| format!("claude failed: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr.trim();
+        return Err(if detail.is_empty() {
+            format!("claude exited with status {}", output.status)
+        } else {
+            detail.to_string()
+        });
+    }
+
+    let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if answer.is_empty() {
+        return Err("claude returned an empty response".to_string());
+    }
+    Ok(answer)
+}
+
 #[tauri::command]
 async fn open_folder(
     app_handle: tauri::AppHandle,
@@ -965,6 +1086,8 @@ fn main() {
             append_followup,
             delete_followup,
             count_followups,
+            claude_available,
+            ask_claude,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

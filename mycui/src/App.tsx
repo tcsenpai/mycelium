@@ -16,12 +16,15 @@ import {
   CalendarDays,
   CheckCheck,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDot,
   Columns,
   FolderOpen,
   Layers3,
+  LayoutDashboard,
   Loader,
+  MessageCircle,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
@@ -37,6 +40,8 @@ import {
 } from 'lucide-react';
 import {
   appendFollowup,
+  askClaude,
+  claudeAvailable,
   closeTask,
   countFollowups,
   createFollowup,
@@ -59,6 +64,7 @@ import {
 import type { TaskUpdateInput } from './lib/api';
 import type {
   Assignee,
+  DashboardStats,
   Epic,
   Followup,
   FollowupStatus,
@@ -78,6 +84,7 @@ const QUERY_KEYS = {
   tags: ['tags'],
   followups: ['followups'],
   followupCounts: ['followup-counts'],
+  claude: ['claude-available'],
 };
 
 type StatusFilter = 'open' | 'in_progress' | 'closed' | 'blocked' | 'overdue';
@@ -99,7 +106,7 @@ function matchesStatusFilter(task: Task, filter: StatusFilter): boolean {
   }
 }
 type PriorityFilter = 'all' | Priority;
-type WorkspaceMode = 'overview' | 'analytics' | 'followups';
+type WorkspaceMode = 'overview' | 'dashboard' | 'analytics' | 'followups';
 type BoardLayout = 'kanban' | 'slate' | 'dag';
 type SmartFilter = 'all' | 'focus' | 'up-next' | 'unassigned' | 'unscheduled' | 'recent';
 type DueFilter = 'all' | 'overdue' | 'today' | 'soon' | 'none';
@@ -156,6 +163,52 @@ type DetailDraft = {
   description: string;
   tags: string;
 };
+
+// Above this many epics the rail shows a filter input. Below it, the list is
+// short enough to scan and the input would just eat vertical space.
+const EPIC_FILTER_THRESHOLD = 10;
+
+type EpicWithStats = Epic & {
+  total_tasks: number;
+  open_tasks: number;
+  is_done: boolean;
+};
+
+// Two-line chip: title row (truncated) + progress bar row. Replaces the old
+// four-value single row, which squeezed the title to ~150px in a 320px rail.
+function EpicChip({
+  epic,
+  isSelected,
+  onToggle,
+}: {
+  epic: EpicWithStats;
+  isSelected: boolean;
+  onToggle: () => void;
+}) {
+  const progress =
+    epic.total_tasks > 0
+      ? Math.round(((epic.total_tasks - epic.open_tasks) / epic.total_tasks) * 100)
+      : 0;
+
+  return (
+    <button
+      className={`epic-chip ${isSelected ? 'is-active' : ''} ${epic.is_done ? 'is-done' : ''}`}
+      type="button"
+      onClick={onToggle}
+      title={`#${epic.id} ${epic.title} — ${epic.is_done ? 'complete' : `${epic.open_tasks} open`} (${progress}%)`}
+      aria-pressed={isSelected}
+    >
+      <span className="epic-chip-row">
+        <span className="epic-num">#{epic.id}</span>
+        <span className="epic-chip-title">{epic.title}</span>
+        <span className="epic-chip-meta">{epic.is_done ? 'done' : epic.open_tasks}</span>
+      </span>
+      <span className="epic-chip-track" aria-hidden="true">
+        <span className="epic-chip-fill" style={{ width: `${progress}%` }} />
+      </span>
+    </button>
+  );
+}
 
 function priorityRank(priority: Priority) {
   switch (priority) {
@@ -479,7 +532,14 @@ function App() {
   });
   const [analyticsWindow, setAnalyticsWindow] = useState<AnalyticsWindow>(30);
   const [selectedEpicId, setSelectedEpicId] = useState<number | null>(null);
-  const [hideClosedEpics, setHideClosedEpics] = useState(false);
+  const [epicFilter, setEpicFilter] = useState('');
+  const [doneEpicsOpen, setDoneEpicsOpen] = useState(() =>
+    readPersistedBool('mycui-done-epics-open', false)
+  );
+  const [boardDoneOpen, setBoardDoneOpen] = useState(() =>
+    readPersistedBool('mycui-board-done-open', false)
+  );
+  const [chatOpen, setChatOpen] = useState(() => readPersistedBool('mycui-chat-open', false));
   const [queueEpicFilter, setQueueEpicFilter] = useState('all');
   const [queueAssigneeFilter, setQueueAssigneeFilter] = useState('all');
   const [queueTagFilter, setQueueTagFilter] = useState('all');
@@ -539,6 +599,15 @@ function App() {
     queryFn: getAllTags,
     refetchInterval: 30_000,
     placeholderData: (previous) => previous,
+  });
+
+  // Probed once: whether the claude CLI is installed decides if the chat
+  // launcher is shown at all.
+  const claudeQuery = useQuery({
+    queryKey: QUERY_KEYS.claude,
+    queryFn: claudeAvailable,
+    staleTime: Infinity,
+    retry: false,
   });
 
   const openProjectMutation = useMutation({
@@ -709,6 +778,9 @@ function App() {
   useEffect(() => writePersistedBool('mycui-detail-collapsed', detailCollapsed), [detailCollapsed]);
   useEffect(() => writePersistedBool('mycui-filters-open', filtersOpen), [filtersOpen]);
   useEffect(() => writePersistedBool('mycui-recent-open', recentOpen), [recentOpen]);
+  useEffect(() => writePersistedBool('mycui-done-epics-open', doneEpicsOpen), [doneEpicsOpen]);
+  useEffect(() => writePersistedBool('mycui-board-done-open', boardDoneOpen), [boardDoneOpen]);
+  useEffect(() => writePersistedBool('mycui-chat-open', chatOpen), [chatOpen]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -946,10 +1018,44 @@ function App() {
       is_done: isDone,
     };
   });
-  const doneEpicCount = epicsWithStats.filter((epic) => epic.is_done).length;
-  const visibleEpics = hideClosedEpics
-    ? epicsWithStats.filter((epic) => !epic.is_done)
+  // Epic rail: filter first, then split active/done so the two groups always
+  // agree on what the filter admitted.
+  const epicFilterTerm = epicFilter.trim().toLowerCase();
+  const filteredEpics = epicFilterTerm
+    ? epicsWithStats.filter(
+        (epic) =>
+          epic.title.toLowerCase().includes(epicFilterTerm) ||
+          String(epic.id) === epicFilterTerm.replace(/^#/, '')
+      )
     : epicsWithStats;
+  const activeEpics = filteredEpics.filter((epic) => !epic.is_done);
+  const doneEpics = filteredEpics.filter((epic) => epic.is_done);
+
+  // Dashboard board works on the full epic set — the rail filter is a rail
+  // concern and shouldn't silently hide epics from the project board.
+  const epicBoardCards = buildEpicBoardCards(epicsWithStats, tasks);
+  const epicBoardSummary = [
+    {
+      label: 'Epics',
+      value: String(epicBoardCards.length),
+      meta: `${epicBoardCards.filter((card) => card.column === 'done').length} complete`,
+    },
+    {
+      label: 'In flight',
+      value: String(epicBoardCards.filter((card) => card.column === 'in_progress').length),
+      meta: 'started, not finished',
+    },
+    {
+      label: 'Blocked',
+      value: String(epicBoardCards.filter((card) => card.column === 'blocked').length),
+      meta: 'have blocked tasks',
+    },
+    {
+      label: 'Not started',
+      value: String(epicBoardCards.filter((card) => card.column === 'backlog').length),
+      meta: 'no closed tasks yet',
+    },
+  ];
   const highSignalTasks = openTasks
     .filter((task) => task.priority === 'high' || task.priority === 'critical')
     .slice(0, 3);
@@ -1440,46 +1546,88 @@ function App() {
           <p className="project-path">{projectPath ?? 'Pick a project folder that already contains `.mycelium/mycelium.db`.'}</p>
         </div>
 
-        <section className="rail-section">
+        <section className="rail-section rail-section-epics">
           <div className="rail-section-head">
             <span>Epics</span>
             <div className="rail-section-head-tools">
-              {doneEpicCount > 0 ? (
-                <button
-                  type="button"
-                  className={`text-toggle ${hideClosedEpics ? 'is-active' : ''}`}
-                  onClick={() => setHideClosedEpics((current) => !current)}
-                  title={hideClosedEpics ? 'Show completed epics' : 'Hide completed epics'}
-                >
-                  {hideClosedEpics ? `Show done (${doneEpicCount})` : 'Hide done'}
-                </button>
-              ) : null}
+              <span className="rail-count">{activeEpics.length}</span>
               <Layers3 size={16} />
             </div>
           </div>
+
+          {/* The filter only earns its vertical space once the list is long
+              enough to be worth searching. */}
+          {epicsWithStats.length > EPIC_FILTER_THRESHOLD ? (
+            <label className="epic-filter">
+              <Search size={13} />
+              <input
+                value={epicFilter}
+                onChange={(event) => setEpicFilter(event.target.value)}
+                placeholder="Filter epics…"
+                aria-label="Filter epics"
+              />
+              {epicFilter ? (
+                <button
+                  type="button"
+                  className="epic-filter-clear"
+                  onClick={() => setEpicFilter('')}
+                  aria-label="Clear epic filter"
+                >
+                  <X size={12} />
+                </button>
+              ) : null}
+            </label>
+          ) : null}
+
           <div className="epic-stack">
             {epics.length === 0 ? (
               <div className="muted-panel">No epics yet. The app still works fine for task-only projects.</div>
-            ) : visibleEpics.length === 0 ? (
-              <div className="muted-panel">All epics complete. Toggle “Show done” to see them.</div>
+            ) : filteredEpics.length === 0 ? (
+              <div className="muted-panel">No epics match “{epicFilter}”.</div>
             ) : (
-              visibleEpics.map((epic) => {
-                const progress = epic.total_tasks > 0 ? Math.round(((epic.total_tasks - epic.open_tasks) / epic.total_tasks) * 100) : 0;
-                return (
-                  <button
+              <>
+                {activeEpics.map((epic) => (
+                  <EpicChip
                     key={epic.id}
-                    className={`epic-chip ${selectedEpicId === epic.id ? 'is-active' : ''} ${epic.is_done ? 'is-done' : ''}`}
-                    type="button"
-                    onClick={() => setSelectedEpicId((current) => (current === epic.id ? null : epic.id))}
-                  >
-                    <div>
-                      <strong><span className="epic-num">#{epic.id}</span> {epic.title}</strong>
-                      <span>{epic.is_done ? 'Complete' : `${epic.open_tasks} open`}</span>
-                    </div>
-                    <em>{progress}%</em>
-                  </button>
-                );
-              })
+                    epic={epic}
+                    isSelected={selectedEpicId === epic.id}
+                    onToggle={() =>
+                      setSelectedEpicId((current) => (current === epic.id ? null : epic.id))
+                    }
+                  />
+                ))}
+
+                {activeEpics.length === 0 ? (
+                  <div className="muted-panel">All epics complete.</div>
+                ) : null}
+
+                {doneEpics.length > 0 ? (
+                  <>
+                    <button
+                      type="button"
+                      className="epic-group-toggle"
+                      onClick={() => setDoneEpicsOpen((current) => !current)}
+                      aria-expanded={doneEpicsOpen}
+                    >
+                      {doneEpicsOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      <span>Done</span>
+                      <em>{doneEpics.length}</em>
+                    </button>
+                    {doneEpicsOpen
+                      ? doneEpics.map((epic) => (
+                          <EpicChip
+                            key={epic.id}
+                            epic={epic}
+                            isSelected={selectedEpicId === epic.id}
+                            onToggle={() =>
+                              setSelectedEpicId((current) => (current === epic.id ? null : epic.id))
+                            }
+                          />
+                        ))
+                      : null}
+                  </>
+                ) : null}
+              </>
             )}
           </div>
         </section>
@@ -1537,6 +1685,15 @@ function App() {
             >
               <Layers3 size={16} />
               <span>Overview</span>
+            </button>
+            <button
+              className={`view-switch-button ${workspaceMode === 'dashboard' ? 'is-active' : ''}`}
+              type="button"
+              aria-current={workspaceMode === 'dashboard' ? 'page' : undefined}
+              onClick={() => setWorkspaceMode('dashboard')}
+            >
+              <LayoutDashboard size={16} />
+              <span>Dashboard</span>
             </button>
             <button
               className={`view-switch-button ${workspaceMode === 'analytics' ? 'is-active' : ''}`}
@@ -2109,6 +2266,56 @@ function App() {
           </>
           )}
         </section>
+        ) : workspaceMode === 'dashboard' ? (
+        <section className="dashboard-view">
+          <div className="panel dashboard-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Project</p>
+                <h3>Epic board</h3>
+              </div>
+              <div className="panel-head-tools">
+                <span className="panel-note">
+                  Columns derive from task state — click an epic to open it in Overview
+                </span>
+                <div className="task-count">
+                  <Layers3 size={16} />
+                  <span>{epicBoardCards.length}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="dashboard-kpi-row">
+              {epicBoardSummary.map((entry) => (
+                <article key={entry.label} className="analytics-kpi">
+                  <span>{entry.label}</span>
+                  <strong>{entry.value}</strong>
+                  <small>{entry.meta}</small>
+                </article>
+              ))}
+            </div>
+
+            {loading ? (
+              <div className="task-skeleton" aria-busy="true" aria-live="polite">
+                <span className="sr-only">Loading epics…</span>
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="skeleton-row" />
+                ))}
+              </div>
+            ) : (
+              <EpicBoard
+                cards={epicBoardCards}
+                selectedEpicId={selectedEpicId}
+                doneOpen={boardDoneOpen}
+                onToggleDone={() => setBoardDoneOpen((current) => !current)}
+                onOpenEpic={(id) => {
+                  setSelectedEpicId(id);
+                  setWorkspaceMode('overview');
+                }}
+              />
+            )}
+          </div>
+        </section>
         ) : workspaceMode === 'analytics' ? (
         <section className="analytics-grid">
           <div className="panel analytics-panel analytics-panel-wide">
@@ -2496,6 +2703,26 @@ function App() {
           </button>
         </div>
       ) : null}
+      <ProjectChat
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        available={claudeQuery.data ?? false}
+        buildContext={() =>
+          buildProjectContext(projectPath, stats, epicsWithStats, tasks, assignees)
+        }
+      />
+      {claudeQuery.data ? (
+        <button
+          className={`chat-fab ${chatOpen ? 'is-active' : ''}`}
+          type="button"
+          onClick={() => setChatOpen((current) => !current)}
+          title={chatOpen ? 'Close project chat' : 'Chat about project status'}
+          aria-label={chatOpen ? 'Close project chat' : 'Open project chat'}
+          aria-pressed={chatOpen}
+        >
+          {chatOpen ? <X size={18} /> : <MessageCircle size={18} />}
+        </button>
+      ) : null}
       <button
         className="help-fab"
         type="button"
@@ -2717,6 +2944,542 @@ function KanbanBoard({
         );
       })}
     </div>
+  );
+}
+
+// ---- Project chat -------------------------------------------------------
+// A one-shot `claude -p` call per turn: the CLI keeps no session between
+// invocations, so each prompt carries a fresh project digest plus the
+// transcript so far. Cheaper than it sounds — the digest is the same data
+// the board already holds, and it means the answer always reflects the
+// current DB rather than a snapshot from when the panel opened.
+
+type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
+const CHAT_HISTORY_TURNS = 6;
+
+// Mirrors `myc summary` + `myc list --all` so answers are grounded in the
+// same facts the CLI would report.
+function buildProjectContext(
+  projectPath: string | null,
+  stats: DashboardStats | undefined,
+  epics: EpicWithStats[],
+  tasks: Task[],
+  assignees: Assignee[]
+): string {
+  const lines: string[] = [];
+  const project = projectPath ? projectPath.split('/').pop() : 'unknown';
+  lines.push(`PROJECT: ${project}`);
+  lines.push(`Today: ${new Date().toISOString().slice(0, 10)}`);
+  lines.push('');
+
+  lines.push('SUMMARY');
+  lines.push(
+    `  tasks: ${stats?.total_tasks ?? tasks.length} total, ${stats?.open_tasks ?? 0} open, ` +
+      `${stats?.closed_tasks ?? 0} closed, ${stats?.blocked_tasks ?? 0} blocked, ` +
+      `${stats?.overdue_tasks ?? 0} overdue`
+  );
+  lines.push(
+    `  epics: ${epics.length} total, ${epics.filter((epic) => epic.is_done).length} complete`
+  );
+  lines.push(`  completion: ${Math.round(stats?.completion_rate ?? 0)}%`);
+  lines.push('');
+
+  if (epics.length > 0) {
+    lines.push('EPICS');
+    for (const epic of epics) {
+      const done = epic.total_tasks - epic.open_tasks;
+      lines.push(
+        `  #${epic.id} ${epic.title} — ${done}/${epic.total_tasks} closed` +
+          `${epic.is_done ? ' [complete]' : ''}`
+      );
+    }
+    lines.push('');
+  }
+
+  const assigneeName = new Map(assignees.map((a) => [a.id, a.name]));
+
+  lines.push('TASKS');
+  for (const task of tasks) {
+    const bits = [`#${task.id}`, `[${task.status}]`, `[${task.priority}]`, task.title];
+    if (task.epic_id) bits.push(`epic:#${task.epic_id}`);
+    if (task.assignee_id) bits.push(`owner:${assigneeName.get(task.assignee_id) ?? task.assignee_id}`);
+    if (task.due_date) {
+      const delta = dueDelta(task);
+      bits.push(
+        `due:${task.due_date}${delta !== null && delta < 0 && task.status !== 'closed' ? ' OVERDUE' : ''}`
+      );
+    }
+    if (task.blocked_by.length > 0) bits.push(`blocked_by:${task.blocked_by.join(',')}`);
+    if (task.blocks.length > 0) bits.push(`blocks:${task.blocks.join(',')}`);
+    if (task.tags) bits.push(`tags:${task.tags}`);
+    lines.push(`  ${bits.join(' ')}`);
+  }
+
+  return lines.join('\n');
+}
+
+function buildChatPrompt(context: string, history: ChatMessage[], question: string): string {
+  const transcript = history
+    .slice(-CHAT_HISTORY_TURNS * 2)
+    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
+    .join('\n\n');
+
+  return [
+    'You are a project status assistant embedded in a task manager. Answer ONLY from the',
+    'project data below. If the data does not contain the answer, say so plainly instead of',
+    'guessing. Be concise: a few sentences or a short list. Reference tasks as #id.',
+    '',
+    'You are READ-ONLY: you cannot modify this project and must never claim to have done so.',
+    'When the user asks for a change, do not perform it — reply with the exact `myc` command',
+    'they can run themselves, then stop. The relevant commands are:',
+    '  myc task create --title "..." [-e EPIC_ID] [-p low|medium|high|critical] [-u YYYY-MM-DD] [-g tags]',
+    '  myc task update <ID> [-t title] [-s open|in_progress|closed] [-p priority] [-e epic] [-u due] [-g tags]',
+    '  myc task close <ID> | myc task reopen <ID> | myc task delete <ID>',
+    '  myc epic create --title "..." | myc epic update <ID> [-t title] | myc epic delete <ID>',
+    '  myc list [--all] [-e EPIC] [-s STATUS] [-p PRIORITY] [--blocked] [--overdue]',
+    '  myc summary',
+    'Quote commands in a code block. Never invent flags that are not in this list.',
+    '',
+    '--- PROJECT DATA ---',
+    context,
+    '--- END PROJECT DATA ---',
+    ...(transcript ? ['', '--- CONVERSATION SO FAR ---', transcript, '--- END CONVERSATION ---'] : []),
+    '',
+    `User question: ${question}`,
+  ].join('\n');
+}
+
+function ProjectChat({
+  open,
+  onClose,
+  available,
+  buildContext,
+}: {
+  open: boolean;
+  onClose: () => void;
+  available: boolean;
+  buildContext: () => string;
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  const askMutation = useMutation({
+    mutationFn: async (question: string) =>
+      askClaude(buildChatPrompt(buildContext(), messages, question)),
+    onSuccess: (answer) => {
+      setMessages((current) => [...current, { role: 'assistant', content: answer }]);
+      setError(null);
+    },
+    onError: (mutationError) => {
+      setError(describeError(mutationError));
+    },
+  });
+
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [open]);
+
+  // Keep the newest turn in view as answers arrive.
+  useEffect(() => {
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
+  }, [messages, askMutation.isPending]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const submit = () => {
+    const question = draft.trim();
+    if (!question || askMutation.isPending) return;
+    setMessages((current) => [...current, { role: 'user', content: question }]);
+    setDraft('');
+    askMutation.mutate(question);
+  };
+
+  return (
+    <aside className="chat-panel" role="dialog" aria-label="Project chat">
+      <header className="chat-panel-head">
+        <div>
+          <p className="eyebrow">Ask</p>
+          <h3>Project chat</h3>
+        </div>
+        <div className="chat-head-tools">
+          {messages.length > 0 ? (
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => {
+                setMessages([]);
+                setError(null);
+              }}
+              title="Clear conversation"
+              aria-label="Clear conversation"
+            >
+              <Trash2 size={15} />
+            </button>
+          ) : null}
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            title="Close chat"
+            aria-label="Close chat"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      </header>
+
+      {!available ? (
+        <div className="chat-log">
+          <div className="muted-panel">
+            The <code>claude</code> CLI was not found. Install Claude Code, or set
+            <code> CLAUDE_BINARY</code> to its full path and restart the app.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="chat-log" ref={logRef}>
+            {messages.length === 0 ? (
+              <div className="chat-empty">
+                <p>Ask about the current project state.</p>
+                <div className="chat-suggestions">
+                  {[
+                    "What's blocked right now?",
+                    'What should I work on next?',
+                    'Which epics are at risk?',
+                  ].map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      className="filter-chip"
+                      onClick={() => {
+                        setMessages([{ role: 'user', content: suggestion }]);
+                        askMutation.mutate(suggestion);
+                      }}
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              messages.map((message, index) => (
+                <div key={index} className={`chat-message is-${message.role}`}>
+                  {message.role === 'assistant' ? (
+                    <MarkdownBlock content={message.content} />
+                  ) : (
+                    <p>{message.content}</p>
+                  )}
+                </div>
+              ))
+            )}
+
+            {askMutation.isPending ? (
+              <div className="chat-message is-assistant is-pending">
+                <Loader size={14} className="spin" />
+                <span>Thinking…</span>
+              </div>
+            ) : null}
+
+            {error ? (
+              <div className="chat-error" role="alert">
+                <AlertTriangle size={14} />
+                <span>{error}</span>
+              </div>
+            ) : null}
+          </div>
+
+          <form
+            className="chat-composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submit();
+            }}
+          >
+            <textarea
+              ref={inputRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                // Enter sends; Shift+Enter makes a new line.
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder="Ask about tasks, epics, blockers…"
+              rows={2}
+              disabled={askMutation.isPending}
+            />
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={askMutation.isPending || !draft.trim()}
+            >
+              {askMutation.isPending ? <Loader size={15} className="spin" /> : <ArrowRight size={15} />}
+              <span>Send</span>
+            </button>
+          </form>
+        </>
+      )}
+    </aside>
+  );
+}
+
+// ---- Epic dashboard -----------------------------------------------------
+// Epics carry no workflow status in the schema (only open/closed), so board
+// columns are DERIVED from the state of their tasks. Order matters: an epic
+// is tested against the columns top-down and lands in the first match, so
+// "blocked" outranks "in progress" (a stalled epic should surface as stalled).
+const EPIC_BOARD_COLUMNS: { key: EpicBoardColumn; label: string }[] = [
+  { key: 'backlog', label: 'Backlog' },
+  { key: 'in_progress', label: 'In progress' },
+  { key: 'blocked', label: 'Blocked' },
+  { key: 'done', label: 'Done' },
+];
+
+type EpicBoardColumn = 'backlog' | 'in_progress' | 'blocked' | 'done';
+
+type EpicBoardCard = EpicWithStats & {
+  column: EpicBoardColumn;
+  progress: number;
+  closedCount: number;
+  blockedCount: number;
+  overdueCount: number;
+  priorityMix: Record<Priority, number>;
+};
+
+function buildEpicBoardCards(epics: EpicWithStats[], tasks: Task[]): EpicBoardCard[] {
+  const byEpic = new Map<number, Task[]>();
+  for (const task of tasks) {
+    if (task.epic_id === undefined || task.epic_id === null) continue;
+    const bucket = byEpic.get(task.epic_id);
+    if (bucket) bucket.push(task);
+    else byEpic.set(task.epic_id, [task]);
+  }
+
+  return epics.map((epic) => {
+    const epicTasks = byEpic.get(epic.id) ?? [];
+    const closedCount = epicTasks.filter((task) => task.status === 'closed').length;
+    const openTasks = epicTasks.filter((task) => task.status !== 'closed');
+    const blockedCount = openTasks.filter((task) => task.blocked_by.length > 0).length;
+    const overdueCount = openTasks.filter((task) => (dueDelta(task) ?? 1) < 0).length;
+
+    const priorityMix: Record<Priority, number> = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const task of openTasks) {
+      priorityMix[task.priority] += 1;
+    }
+
+    const progress =
+      epicTasks.length > 0 ? Math.round((closedCount / epicTasks.length) * 100) : 0;
+
+    let column: EpicBoardColumn;
+    if (epic.is_done) {
+      column = 'done';
+    } else if (blockedCount > 0) {
+      column = 'blocked';
+    } else if (closedCount > 0 || epicTasks.length !== openTasks.length) {
+      column = 'in_progress';
+    } else {
+      // No task has ever been closed: still untouched, regardless of size.
+      column = 'backlog';
+    }
+
+    return {
+      ...epic,
+      column,
+      progress,
+      closedCount,
+      blockedCount,
+      overdueCount,
+      priorityMix,
+    };
+  });
+}
+
+function EpicBoard({
+  cards,
+  selectedEpicId,
+  onOpenEpic,
+  doneOpen,
+  onToggleDone,
+}: {
+  cards: EpicBoardCard[];
+  selectedEpicId: number | null;
+  onOpenEpic: (id: number) => void;
+  doneOpen: boolean;
+  onToggleDone: () => void;
+}) {
+  const grouped = new Map<EpicBoardColumn, EpicBoardCard[]>(
+    EPIC_BOARD_COLUMNS.map((col) => [col.key, []])
+  );
+  for (const card of cards) {
+    grouped.get(card.column)?.push(card);
+  }
+  // Most pressure first inside each column.
+  for (const list of grouped.values()) {
+    list.sort(
+      (a, b) =>
+        b.blockedCount - a.blockedCount ||
+        b.overdueCount - a.overdueCount ||
+        b.open_tasks - a.open_tasks ||
+        a.id - b.id
+    );
+  }
+
+  if (cards.length === 0) {
+    return (
+      <div className="empty-state">
+        <Layers3 size={20} />
+        <span>No epics yet. Create an epic to see the project board.</span>
+      </div>
+    );
+  }
+
+  const doneCount = (grouped.get('done') ?? []).length;
+
+  return (
+    <div className={`epic-board ${doneOpen ? '' : 'done-is-collapsed'}`}>
+      {EPIC_BOARD_COLUMNS.map((col) => {
+        const items = grouped.get(col.key) ?? [];
+        const isDone = col.key === 'done';
+
+        // Done is finished work: collapsed by default to a vertical spine so
+        // it stays reachable without competing with active columns.
+        if (isDone && !doneOpen) {
+          return (
+            <button
+              key={col.key}
+              type="button"
+              className="epic-board-column epic-board-done epic-board-done-collapsed"
+              onClick={onToggleDone}
+              title={`Show ${doneCount} completed epic${doneCount === 1 ? '' : 's'}`}
+              aria-expanded={false}
+            >
+              <ChevronLeft size={14} />
+              <span className="epic-board-done-spine">Done</span>
+              <span className="kanban-column-count">{doneCount}</span>
+            </button>
+          );
+        }
+
+        return (
+          <section key={col.key} className={`epic-board-column epic-board-${col.key}`}>
+            <header className="epic-board-column-head">
+              {isDone ? (
+                <button
+                  type="button"
+                  className="epic-board-done-toggle"
+                  onClick={onToggleDone}
+                  title="Collapse completed epics"
+                  aria-expanded
+                >
+                  <ChevronDown size={13} />
+                  <span>{col.label}</span>
+                </button>
+              ) : (
+                <span>{col.label}</span>
+              )}
+              <span className="kanban-column-count">{items.length}</span>
+            </header>
+            <div className="epic-board-column-body">
+              {items.length === 0 ? (
+                <p className="kanban-column-empty">Nothing here.</p>
+              ) : (
+                items.map((card) => (
+                  <EpicBoardCardView
+                    key={card.id}
+                    card={card}
+                    isSelected={selectedEpicId === card.id}
+                    onOpen={() => onOpenEpic(card.id)}
+                  />
+                ))
+              )}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function EpicBoardCardView({
+  card,
+  isSelected,
+  onOpen,
+}: {
+  card: EpicBoardCard;
+  isSelected: boolean;
+  onOpen: () => void;
+}) {
+  const mix = (['critical', 'high', 'medium', 'low'] as Priority[]).filter(
+    (priority) => card.priorityMix[priority] > 0
+  );
+
+  return (
+    <button
+      type="button"
+      className={`epic-board-card ${isSelected ? 'is-selected' : ''}`}
+      onClick={onOpen}
+      title={`Open #${card.id} ${card.title} in Overview`}
+    >
+      <span className="epic-board-card-head">
+        <span className="epic-num">#{card.id}</span>
+        <span className="epic-board-card-title">{card.title}</span>
+      </span>
+
+      <span className="epic-board-card-track" aria-hidden="true">
+        <span className="epic-board-card-fill" style={{ width: `${card.progress}%` }} />
+      </span>
+
+      <span className="epic-board-card-meta">
+        <span>
+          {card.closedCount}/{card.total_tasks} closed
+        </span>
+        <span>{card.progress}%</span>
+      </span>
+
+      {card.blockedCount > 0 || card.overdueCount > 0 || mix.length > 0 ? (
+        <span className="epic-board-card-flags">
+          {card.blockedCount > 0 ? (
+            <span className="epic-flag is-blocked">
+              <AlertTriangle size={11} />
+              {card.blockedCount} blocked
+            </span>
+          ) : null}
+          {card.overdueCount > 0 ? (
+            <span className="epic-flag is-overdue">
+              <CalendarDays size={11} />
+              {card.overdueCount} overdue
+            </span>
+          ) : null}
+          {mix.length > 0 ? (
+            <span
+              className="epic-priority-mix"
+              title={mix.map((p) => `${priorityLabel(p)}: ${card.priorityMix[p]}`).join(' · ')}
+            >
+              {mix.map((priority) => (
+                <span key={priority} className={`priority-dot is-${priority}`} />
+              ))}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </button>
   );
 }
 

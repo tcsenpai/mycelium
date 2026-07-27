@@ -170,3 +170,11 @@ export async function deleteFollowup(id: number): Promise<void> {
 export async function countFollowups(): Promise<FollowupCounts> {
   return invoke('count_followups');
 }
+
+export async function claudeAvailable(): Promise<boolean> {
+  return invoke('claude_available');
+}
+
+export async function askClaude(prompt: string, model?: string): Promise<string> {
+  return invoke('ask_claude', { prompt, model });
+}
