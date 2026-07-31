@@ -605,3 +605,180 @@ fn update_task_cannot_close_a_blocked_task() {
     )
     .expect("no open blockers left -> close is allowed");
 }
+
+// --- FK reference validation -------------------------------------------
+// `tasks.epic_id`/`assignee_id` are real FKs with `PRAGMA foreign_keys = ON`,
+// so a dangling id always failed — but as a raw
+// "FOREIGN KEY constraint failed" naming neither column nor id. These tests
+// pin the actionable error; if they start seeing the SQLite text again, the
+// up-front check was lost.
+
+fn assert_not_found(err: mycelium_core::error::MyceliumError, entity: &str, id: &str) {
+    match err {
+        mycelium_core::error::MyceliumError::NotFound { entity: e, id: got } => {
+            assert_eq!(e, entity, "wrong entity in NotFound");
+            assert_eq!(got, id, "wrong id in NotFound");
+        }
+        other => panic!("expected NotFound({entity} #{id}), got: {other}"),
+    }
+}
+
+#[test]
+fn create_task_rejects_missing_epic() {
+    let mut db = db();
+    let err = db
+        .create_task(
+            "orphan",
+            None,
+            Some(73),
+            Priority::High,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("epic #73 does not exist");
+    assert_not_found(err, "epic", "73");
+}
+
+#[test]
+fn create_task_rejects_missing_assignee() {
+    let mut db = db();
+    let err = db
+        .create_task(
+            "orphan",
+            None,
+            None,
+            Priority::Medium,
+            Some(404),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("assignee #404 does not exist");
+    assert_not_found(err, "assignee", "404");
+}
+
+#[test]
+fn create_task_accepts_valid_and_absent_refs() {
+    let mut db = db();
+    let epic = db.create_epic("Real", None, None, None).unwrap();
+    let who = db.create_assignee("Ada", None, None).unwrap();
+
+    let t = db
+        .create_task(
+            "linked",
+            None,
+            Some(epic.id),
+            Priority::High,
+            Some(who.id),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("valid refs are accepted");
+    assert_eq!(t.epic_id, Some(epic.id));
+    assert_eq!(t.assignee_id, Some(who.id));
+
+    // No refs at all is still legal — validation must not reject None.
+    db.create_task(
+        "free",
+        None,
+        None,
+        Priority::Low,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("absent refs are accepted");
+}
+
+#[test]
+fn update_task_rejects_missing_epic_without_partial_write() {
+    let mut db = db();
+    let t = db
+        .create_task(
+            "before",
+            None,
+            None,
+            Priority::Low,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    // Title and epic in one call. The field UPDATEs are separate statements,
+    // so if the epic were only caught by SQLite the title would already be
+    // committed. Nothing may change.
+    let err = db
+        .update_task(
+            t.id,
+            Some("after"),
+            None,
+            None,
+            None,
+            Some(Some(73)),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("epic #73 does not exist");
+    assert_not_found(err, "epic", "73");
+
+    let unchanged = db.get_task(t.id).unwrap().expect("task still there");
+    assert_eq!(
+        unchanged.title, "before",
+        "failed update must not leave a partial write"
+    );
+    assert_eq!(unchanged.epic_id, None);
+}
+
+#[test]
+fn update_task_can_still_clear_refs() {
+    let mut db = db();
+    let epic = db.create_epic("E", None, None, None).unwrap();
+    let t = db
+        .create_task(
+            "t",
+            None,
+            Some(epic.id),
+            Priority::Low,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    // Some(None) means "clear it" — there is no id to look up, so this must
+    // not be mistaken for a dangling reference.
+    let cleared = db
+        .update_task(
+            t.id,
+            None,
+            None,
+            None,
+            None,
+            Some(None),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("clearing the epic is allowed");
+    assert_eq!(cleared.epic_id, None);
+}

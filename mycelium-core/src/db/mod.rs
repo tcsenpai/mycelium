@@ -330,6 +330,33 @@ impl Database {
         Ok(())
     }
 
+    /// Reject references to rows that don't exist, before any write.
+    ///
+    /// `tasks.epic_id` and `tasks.assignee_id` are real FKs and
+    /// `PRAGMA foreign_keys` is ON, so a bad id already fails — but as a raw
+    /// `FOREIGN KEY constraint failed` that names neither the column nor the
+    /// id. That message sent a user hunting through flag combinations for a
+    /// bug that was just a missing epic. Check up front and say which one.
+    fn validate_task_refs(&self, epic_id: Option<i64>, assignee_id: Option<i64>) -> Result<()> {
+        if let Some(eid) = epic_id {
+            if self.get_epic(eid)?.is_none() {
+                return Err(MyceliumError::NotFound {
+                    entity: "epic".to_string(),
+                    id: eid.to_string(),
+                });
+            }
+        }
+        if let Some(aid) = assignee_id {
+            if self.get_assignee(aid)?.is_none() {
+                return Err(MyceliumError::NotFound {
+                    entity: "assignee".to_string(),
+                    id: aid.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     // Task operations
     pub fn create_task(
         &mut self,
@@ -343,6 +370,8 @@ impl Database {
         notes: Option<&str>,
         user_info: Option<&str>,
     ) -> Result<Task> {
+        self.validate_task_refs(epic_id, assignee_id)?;
+
         let now = chrono::Local::now().to_rfc3339();
         let due_date_str = due_date.map(|d| d.to_string());
 
@@ -594,6 +623,12 @@ impl Database {
                 ));
             }
         }
+
+        // Also before any write: the field UPDATEs below are separate,
+        // non-transactional statements, so a bad epic/assignee caught by
+        // SQLite mid-sequence would leave the earlier fields already
+        // committed. `Some(None)` clears the ref and needs no lookup.
+        self.validate_task_refs(epic_id.flatten(), assignee_id.flatten())?;
 
         let now = chrono::Local::now().to_rfc3339();
 
