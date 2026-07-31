@@ -619,8 +619,9 @@ async fn close_task(
             .join(", ");
         return Err(format!("Task #{id} is blocked by {blocker_list}"));
     }
+    // Forced: the blocker check just ran above, with a UI-specific message.
     let updated = db
-        .update_task(
+        .update_task_forced(
             id,
             None,
             None,

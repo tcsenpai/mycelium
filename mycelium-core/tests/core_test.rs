@@ -459,3 +459,149 @@ fn batch_close_dedupes_repeated_ids() {
     );
     assert!(outcome.already_closed.is_empty());
 }
+
+#[test]
+fn update_task_cannot_close_a_blocked_task() {
+    // Regression: the blocker guard used to live only in the `close` command,
+    // so `myc task update <id> --status closed` closed a blocked task with no
+    // warning, leaving the incoherent state "closed" + "blocked by #N".
+    // The guard now lives in update_task itself.
+    let mut db = db();
+    let blocked = db
+        .create_task(
+            "Blocked",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let blocker = db
+        .create_task(
+            "Blocker",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    db.add_dependency(blocked.id, blocker.id).unwrap();
+
+    let err = db
+        .update_task(
+            blocked.id,
+            None,
+            None,
+            Some(Status::Closed),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("closing a blocked task via update_task must be refused");
+    assert!(
+        matches!(err, mycelium_core::error::MyceliumError::BlockedBy(_)),
+        "expected BlockedBy, got {err:?}"
+    );
+    assert_eq!(
+        db.get_task(blocked.id).unwrap().unwrap().status,
+        Status::Open,
+        "the refused update must not have written anything"
+    );
+
+    // Non-status edits on a blocked task stay allowed.
+    db.update_task(
+        blocked.id,
+        Some("Renamed while blocked"),
+        None,
+        None,
+        Some(Priority::High),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("editing other fields of a blocked task is fine");
+
+    // The explicit override still works.
+    db.update_task_forced(
+        blocked.id,
+        None,
+        None,
+        Some(Status::Closed),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("update_task_forced bypasses the guard");
+    assert_eq!(
+        db.get_task(blocked.id).unwrap().unwrap().status,
+        Status::Closed
+    );
+
+    // Once the blocker is closed, the plain path works again.
+    let other = db
+        .create_task(
+            "Other blocked",
+            None,
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    db.add_dependency(other.id, blocker.id).unwrap();
+    db.update_task(
+        blocker.id,
+        None,
+        None,
+        Some(Status::Closed),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("the blocker itself has no blockers");
+    db.update_task(
+        other.id,
+        None,
+        None,
+        Some(Status::Closed),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("no open blockers left -> close is allowed");
+}

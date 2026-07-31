@@ -488,6 +488,11 @@ impl Database {
         Ok(result)
     }
 
+    /// Update a task. Closing a task that still has open blockers is refused
+    /// with `BlockedBy` — the dependency guard lives here, not in the callers,
+    /// so no update path can bypass it by accident. Use
+    /// [`Self::update_task_forced`] for the deliberate override.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_task(
         &mut self,
         id: i64,
@@ -503,6 +508,93 @@ impl Database {
         user_info: Option<Option<&str>>,
         agent_questions: Option<Option<&str>>,
     ) -> Result<Task> {
+        self.update_task_inner(
+            id,
+            title,
+            description,
+            status,
+            priority,
+            epic_id,
+            assignee_id,
+            due_date,
+            tags,
+            notes,
+            user_info,
+            agent_questions,
+            false,
+        )
+    }
+
+    /// Same as [`Self::update_task`] but skips the open-blocker check when
+    /// closing. For callers that have already decided to override it
+    /// (`close --force`) or that mirror an authoritative external state
+    /// (Linear sync), where refusing would just desync the two systems.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_task_forced(
+        &mut self,
+        id: i64,
+        title: Option<&str>,
+        description: Option<&str>,
+        status: Option<Status>,
+        priority: Option<Priority>,
+        epic_id: Option<Option<i64>>,
+        assignee_id: Option<Option<i64>>,
+        due_date: Option<Option<chrono::NaiveDate>>,
+        tags: Option<Option<&str>>,
+        notes: Option<Option<&str>>,
+        user_info: Option<Option<&str>>,
+        agent_questions: Option<Option<&str>>,
+    ) -> Result<Task> {
+        self.update_task_inner(
+            id,
+            title,
+            description,
+            status,
+            priority,
+            epic_id,
+            assignee_id,
+            due_date,
+            tags,
+            notes,
+            user_info,
+            agent_questions,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update_task_inner(
+        &mut self,
+        id: i64,
+        title: Option<&str>,
+        description: Option<&str>,
+        status: Option<Status>,
+        priority: Option<Priority>,
+        epic_id: Option<Option<i64>>,
+        assignee_id: Option<Option<i64>>,
+        due_date: Option<Option<chrono::NaiveDate>>,
+        tags: Option<Option<&str>>,
+        notes: Option<Option<&str>>,
+        user_info: Option<Option<&str>>,
+        agent_questions: Option<Option<&str>>,
+        force: bool,
+    ) -> Result<Task> {
+        // Guard before any write: a task must not land in `closed` while it
+        // still has open blockers. Checked here rather than in each caller
+        // because every close path funnels through this method.
+        if !force && status == Some(Status::Closed) {
+            let blockers = self.get_open_blockers(id)?;
+            if !blockers.is_empty() {
+                return Err(MyceliumError::BlockedBy(
+                    blockers
+                        .iter()
+                        .map(|b| format!("#{}: {}", b.id, b.title))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
+        }
+
         let now = chrono::Local::now().to_rfc3339();
 
         if let Some(title) = title {

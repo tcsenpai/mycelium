@@ -876,6 +876,8 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
             id: id.to_string(),
         })?;
 
+    // Checked here too (not just in core) to keep the friendly multi-line
+    // listing and the exit-0 "refused" behaviour this command has always had.
     let blockers = db.get_open_blockers(id)?;
     if !blockers.is_empty() && !force {
         println!(
@@ -890,7 +892,7 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
         return Ok(());
     }
 
-    let updated = db.update_task(
+    let updated = db.update_task_forced(
         id,
         None,
         None,

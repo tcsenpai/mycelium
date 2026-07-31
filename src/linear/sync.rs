@@ -456,7 +456,9 @@ fn apply_remote_to_local(
         .as_deref()
         .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
 
-    db.update_task(
+    // Forced: Linear is authoritative for status here. Refusing a remote
+    // close because of a local blocker would silently desync the two systems.
+    db.update_task_forced(
         entry.local_task_id,
         Some(&issue.title),
         issue.description.as_deref(),
@@ -505,7 +507,9 @@ fn create_local_from_remote(db: &mut Database, issue: &LinearIssue, quiet: bool)
     )?;
 
     if status == Status::Closed {
-        db.update_task(
+        // Forced for the same reason as above: the issue arrives already
+        // closed from Linear, so a local blocker must not veto the import.
+        db.update_task_forced(
             task.id,
             None,
             None,

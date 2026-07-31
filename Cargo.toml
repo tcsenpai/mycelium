@@ -3,7 +3,7 @@ members = ["mycelium-core"]
 
 [package]
 name = "mycelium-manager"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 authors = ["Mycelium Contributors"]
 description = "A robust, production-grade task/plan manager CLI (binary: myc)"
@@ -37,7 +37,7 @@ name = "myc"
 path = "src/main.rs"
 
 [dependencies]
-mycelium-manager-core = { path = "mycelium-core", version = "0.1.1" }
+mycelium-manager-core = { path = "mycelium-core", version = "0.2.0" }
 clap = { version = "4.5", features = ["derive", "env"] }
 rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
 serde = { version = "1.0", features = ["derive"] }
