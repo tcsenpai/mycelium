@@ -47,3 +47,6 @@ publish.sh
 # Icon source masters (deliverables live in assets/ and mycui/src-tauri/icons/)
 /1.png
 /2.png
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
