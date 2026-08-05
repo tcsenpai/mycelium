@@ -1986,6 +1986,24 @@ impl Database {
         Ok(())
     }
 
+    /// Count `open` follow-ups created more than `grace_secs` ago.
+    /// Used by the task-close hint so a follow-up you just jotted down
+    /// doesn't immediately nudge you about itself.
+    pub fn count_stale_open_followups(&self, grace_secs: i64) -> Result<i64> {
+        // created_at is RFC3339 (with T and tz offset); julianday() parses it
+        // and 'now' uniformly, so the comparison is format-agnostic.
+        let cutoff = chrono::Local::now() - chrono::Duration::seconds(grace_secs);
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM followups \
+                 WHERE status = 'open' \
+                 AND julianday(created_at) <= julianday(?1)",
+                [cutoff.to_rfc3339()],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     /// Count rows grouped by status. Returns zero for absent buckets.
     pub fn count_followups(&self) -> Result<FollowupCounts> {
         let mut stmt = self

@@ -358,17 +358,19 @@ pub fn count(format: &OutputFormat, quiet: bool) -> Result<()> {
 /// Best-effort hint printed at end of task close. Never errors.
 pub fn print_close_hint() {
     let Ok(db) = ensure_initialized() else { return };
-    let Ok(counts) = db.count_followups() else {
+    // Nudge only on `open` follow-ups older than the grace window: in_progress
+    // items are already being worked, and a follow-up jotted down seconds ago
+    // (while closing this very task) shouldn't nag about itself.
+    const GRACE_SECS: i64 = 60;
+    let Ok(stale_open) = db.count_stale_open_followups(GRACE_SECS) else {
         return;
     };
-    // ponytail: only nudge on `open` — in_progress items are already being
-    // worked, no need to remind at task close.
-    if counts.open == 0 {
+    if stale_open == 0 {
         return;
     }
     println!(
         "{} {} open follow-up(s) — run `myc followup list` to review",
         WARNING_PREFIX.yellow(),
-        counts.open
+        stale_open
     );
 }

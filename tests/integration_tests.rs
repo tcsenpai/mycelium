@@ -814,7 +814,7 @@ fn test_followup_promote_to_task() {
 }
 
 #[test]
-fn test_followup_close_hint_fires() {
+fn test_followup_close_hint_fires_for_stale() {
     let temp = TempDir::new().unwrap();
     let _ = myc_cmd(&temp).arg("init").output().expect("init");
     let _ = myc_cmd(&temp)
@@ -826,6 +826,16 @@ fn test_followup_close_hint_fires() {
         .output()
         .expect("fu add");
 
+    // Backdate the follow-up past the 60s grace window so it counts as stale.
+    let db_path = temp.path().join(".mycelium").join("mycelium.db");
+    let conn = rusqlite::Connection::open(&db_path).expect("open db");
+    conn.execute(
+        "UPDATE followups SET created_at = datetime('now', '-1 hour')",
+        [],
+    )
+    .expect("backdate followup");
+    drop(conn);
+
     let out = myc_cmd(&temp)
         .args(["task", "close", "1"])
         .output()
@@ -833,6 +843,29 @@ fn test_followup_close_hint_fires() {
     print_output(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("open follow-up"));
+}
+
+#[test]
+fn test_followup_close_hint_ignores_fresh() {
+    let temp = TempDir::new().unwrap();
+    let _ = myc_cmd(&temp).arg("init").output().expect("init");
+    let _ = myc_cmd(&temp)
+        .args(["task", "create", "--title", "Some task"])
+        .output()
+        .expect("task create");
+    // Follow-up added seconds ago (within grace window) must not nag.
+    let _ = myc_cmd(&temp)
+        .args(["followup", "add", "just jotted this down"])
+        .output()
+        .expect("fu add");
+
+    let out = myc_cmd(&temp)
+        .args(["task", "close", "1"])
+        .output()
+        .expect("task close");
+    print_output(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("open follow-up"));
 }
 
 #[test]
