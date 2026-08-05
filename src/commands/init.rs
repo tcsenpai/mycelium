@@ -128,8 +128,9 @@ MUST:
    > handle any now, or leave for later?"
 3. **Never silently process them.** Always ask.
 
-`myc task close` itself also prints a one-line reminder, but the agent
-should still proactively check.
+`myc task close` itself also prints a one-line reminder (only for open
+follow-ups older than ~60s; fresh or in_progress ones stay silent), but
+the agent should still proactively check.
 
 Use `myc followup add` during work to capture anything you notice but
 shouldn't act on right now.
