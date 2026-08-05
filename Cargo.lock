@@ -1059,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "mycelium-manager-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chrono",
  "regex",
