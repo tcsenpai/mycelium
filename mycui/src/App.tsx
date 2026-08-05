@@ -974,9 +974,11 @@ function App() {
     return b.id - a.id;
   });
 
+  // Resolve the selection ONLY against the currently-visible set. Falling back
+  // to the unfiltered `tasks` list would keep a selected task rendered in the
+  // sidebar after it's been filtered out by an epic/view/filter change.
   const selectedTask =
     visibleTasks.find((task) => task.id === selectedTaskId) ??
-    tasks.find((task) => task.id === selectedTaskId) ??
     visibleTasks[0] ??
     null;
 
@@ -996,10 +998,13 @@ function App() {
       return;
     }
 
-    if (selectedTaskId && !tasks.some((task) => task.id === selectedTaskId)) {
+    // Reset when the selected task is no longer visible (epic/view/filter
+    // changed, or the task was closed/deleted) — snap to the first visible task,
+    // or clear if the visible set is empty.
+    if (selectedTaskId && !visibleTasks.some((task) => task.id === selectedTaskId)) {
       setSelectedTaskId(visibleTasks[0]?.id ?? null);
     }
-  }, [selectedTaskId, tasks, visibleTasks]);
+  }, [selectedTaskId, visibleTasks]);
 
   const openTasks = tasks.filter((task) => task.status === 'open');
   const blockedTasks = openTasks.filter((task) => task.blocked_by.length > 0);

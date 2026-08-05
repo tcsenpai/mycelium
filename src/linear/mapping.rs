@@ -130,6 +130,17 @@ pub fn status_to_linear_state_id(
 }
 
 /// Map a Linear workflow state to local status.
+///
+/// ponytail: KNOWN LOSSY ROUND-TRIP. The local `Status` enum has no
+/// `Cancelled` variant, so a Linear `cancelled` issue collapses to `Closed`
+/// here, and on push `Closed` maps back to a `completed` state ("Done") — a
+/// cancelled issue that is reopened and re-closed locally (or resolved via a
+/// LocalWins conflict) will resurface in Linear as *done*, not cancelled.
+/// In normal flow this is masked because the push phase skips closed tasks
+/// (see sync.rs), so it only bites on reopen/re-close or LocalWins.
+/// Preserving the distinction requires adding a real `Cancelled` local status
+/// (enum + Display/FromStr + migration + CLI + UI + blocker logic) — tracked
+/// as a separate feature, not folded into this mapping.
 pub fn status_from_linear(state: &LinearWorkflowState) -> Status {
     match state.state_type.as_str() {
         "completed" | "cancelled" => Status::Closed,

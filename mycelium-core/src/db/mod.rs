@@ -624,81 +624,87 @@ impl Database {
             }
         }
 
-        // Also before any write: the field UPDATEs below are separate,
-        // non-transactional statements, so a bad epic/assignee caught by
-        // SQLite mid-sequence would leave the earlier fields already
-        // committed. `Some(None)` clears the ref and needs no lookup.
+        // Also before any write: validate FK refs up front so a bad
+        // epic/assignee fails before we touch the DB. `Some(None)` clears the
+        // ref and needs no lookup.
         self.validate_task_refs(epic_id.flatten(), assignee_id.flatten())?;
 
         let now = chrono::Local::now().to_rfc3339();
 
+        // The per-field UPDATEs are wrapped in a single transaction: a failure
+        // mid-sequence (SQLITE_BUSY, I/O error, a future constraint) would
+        // otherwise leave earlier fields committed and later ones not — e.g. a
+        // task landing in `closed` (guard already passed) while priority/tags
+        // stay stale and the caller sees an `Err`. All-or-nothing here.
+        let tx = self.conn.transaction()?;
         if let Some(title) = title {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET title = ?1, updated_at = ?2 WHERE id = ?3",
                 (title, &now, id),
             )?;
         }
         if let Some(description) = description {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET description = ?1, updated_at = ?2 WHERE id = ?3",
                 (description, &now, id),
             )?;
         }
         if let Some(status) = status {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET status = ?1, updated_at = ?2 WHERE id = ?3",
                 (status.to_string(), &now, id),
             )?;
         }
         if let Some(priority) = priority {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3",
                 (priority.to_string(), &now, id),
             )?;
         }
         if let Some(epic_id) = epic_id {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET epic_id = ?1, updated_at = ?2 WHERE id = ?3",
                 (epic_id, &now, id),
             )?;
         }
         if let Some(assignee_id) = assignee_id {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET assignee_id = ?1, updated_at = ?2 WHERE id = ?3",
                 (assignee_id, &now, id),
             )?;
         }
         if let Some(due_date) = due_date {
             let due_str = due_date.map(|d| d.to_string());
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET due_date = ?1, updated_at = ?2 WHERE id = ?3",
                 (due_str, &now, id),
             )?;
         }
         if let Some(tags) = tags {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET tags = ?1, updated_at = ?2 WHERE id = ?3",
                 (tags, &now, id),
             )?;
         }
         if let Some(notes) = notes {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET notes = ?1, updated_at = ?2 WHERE id = ?3",
                 (notes, &now, id),
             )?;
         }
         if let Some(user_info) = user_info {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET user_info = ?1, updated_at = ?2 WHERE id = ?3",
                 (user_info, &now, id),
             )?;
         }
         if let Some(agent_questions) = agent_questions {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE tasks SET agent_questions = ?1, updated_at = ?2 WHERE id = ?3",
                 (agent_questions, &now, id),
             )?;
         }
+        tx.commit()?;
 
         self.get_task(id).map(|t| {
             t.ok_or_else(|| MyceliumError::NotFound {
@@ -816,24 +822,44 @@ impl Database {
 
     // Dependency operations
     pub fn add_dependency(&mut self, task_id: i64, depends_on_task_id: i64) -> Result<()> {
-        // Check for circular dependency
-        if self.would_create_cycle(task_id, depends_on_task_id)? {
-            return Err(MyceliumError::CircularDependency(format!(
-                "Task {} already depends on task {} (directly or indirectly)",
-                depends_on_task_id, task_id
-            )));
-        }
+        // The cycle check + INSERT must be atomic against other processes:
+        // two concurrent `add_dependency(1,2)` / `add_dependency(2,1)` could
+        // each pass the check before either inserts, creating a 1<->2 cycle
+        // that makes both tasks mutually un-closable. BEGIN IMMEDIATE grabs the
+        // write lock up front, so the second caller blocks until the first
+        // commits and then sees the first's INSERT during its own check.
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
 
-        self.conn.execute(
-            "INSERT INTO dependencies (task_id, depends_on_task_id, created_at) 
-             VALUES (?1, ?2, ?3)",
-            (
-                task_id,
-                depends_on_task_id,
-                chrono::Local::now().to_rfc3339(),
-            ),
-        )?;
-        Ok(())
+        let result = (|| {
+            if self.would_create_cycle(task_id, depends_on_task_id)? {
+                return Err(MyceliumError::CircularDependency(format!(
+                    "Task {} already depends on task {} (directly or indirectly)",
+                    depends_on_task_id, task_id
+                )));
+            }
+            self.conn.execute(
+                "INSERT INTO dependencies (task_id, depends_on_task_id, created_at)
+                 VALUES (?1, ?2, ?3)",
+                (
+                    task_id,
+                    depends_on_task_id,
+                    chrono::Local::now().to_rfc3339(),
+                ),
+            )?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(())
+            }
+            Err(e) => {
+                // Best-effort rollback; report the original error regardless.
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
     }
 
     pub fn remove_dependency(&mut self, task_id: i64, depends_on_task_id: i64) -> Result<()> {

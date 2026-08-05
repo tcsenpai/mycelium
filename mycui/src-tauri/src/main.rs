@@ -89,24 +89,49 @@ fn add_to_recent_folders(app_dir: &std::path::Path, path: String) {
     let config_path: std::path::PathBuf = app_dir.join("config.json");
     
     let mut config: AppConfig = if config_path.exists() {
-        std::fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|c| serde_json::from_str(&c).ok())
-            .unwrap_or_default()
+        match std::fs::read_to_string(&config_path) {
+            Ok(c) => match serde_json::from_str(&c) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    // The file exists but is corrupt. Falling back to
+                    // default() here would overwrite the user's entire
+                    // recent-folders history with an empty list on the write
+                    // below. Abort instead — preserve whatever is on disk.
+                    eprintln!(
+                        "mycui: config.json is corrupt ({e}); not overwriting to avoid losing recent folders"
+                    );
+                    return;
+                }
+            },
+            Err(e) => {
+                // Transient read failure — don't clobber existing config.
+                eprintln!("mycui: could not read config.json ({e}); skipping recent-folders update");
+                return;
+            }
+        }
     } else {
         AppConfig::default()
     };
-    
+
     // Remove if already exists
     config.recent_folders.retain(|f| f != &path);
-    
+
     // Add to front
     config.recent_folders.insert(0, path);
-    
+
     // Limit to max
     config.recent_folders.truncate(MAX_RECENT_FOLDERS);
-    
-    let _ = std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap_or_default());
+
+    // Serialize before writing: an empty string from a failed serialize would
+    // truncate the file, so bail on error rather than writing garbage.
+    match serde_json::to_string_pretty(&config) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&config_path, json) {
+                eprintln!("mycui: failed to write config.json ({e})");
+            }
+        }
+        Err(e) => eprintln!("mycui: failed to serialize config ({e}); recent folders not saved"),
+    }
 }
 
 fn get_recent_folders_from_disk(app_dir: &std::path::Path) -> Vec<String> {
@@ -117,8 +142,16 @@ fn get_recent_folders_from_disk(app_dir: &std::path::Path) -> Vec<String> {
     }
     
     let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let config: AppConfig = serde_json::from_str(&content).unwrap_or_default();
-    
+    // A corrupt config yields an empty list for this read only — do NOT persist
+    // that here; the write path (add_to_recent_folders) refuses to overwrite a
+    // corrupt file, so the history survives. Log so it isn't silent.
+    let config: AppConfig = serde_json::from_str(&content).unwrap_or_else(|e| {
+        if !content.is_empty() {
+            eprintln!("mycui: config.json is corrupt ({e}); showing no recent folders this run");
+        }
+        AppConfig::default()
+    });
+
     // Filter out non-existent folders
     config.recent_folders
         .into_iter()

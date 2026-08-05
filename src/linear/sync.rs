@@ -291,6 +291,18 @@ pub fn sync(
                         stats.conflicts += 1;
                         match conflict_resolution {
                             ConflictResolution::RemoteWins => {
+                                // A local change is about to be discarded. This
+                                // is the RemoteWins contract for a genuine
+                                // concurrent edit, but it also fires for a local
+                                // edit whose earlier push FAILED (last_local_hash
+                                // never advanced). Record it so the overwrite is
+                                // never silent — the operator can recover the
+                                // lost local edit from this line.
+                                stats.errors.push(format!(
+                                    "Discarded local change on {} ({}) under remote-wins conflict \
+                                     -- if this was an unpushed edit from a failed push, it is now lost",
+                                    task.id, task.title
+                                ));
                                 apply_remote_to_local(db, &entry, issue, &remote_hash, quiet)?;
                                 stats.pulled_updated += 1;
                             }
@@ -379,9 +391,20 @@ pub fn sync(
                                 );
                             }
                         }
-                        Err(e) => stats
-                            .errors
-                            .push(format!("Failed to update {}: {}", task.id, e)),
+                        Err(e) => {
+                            // Push failed: the local change is NOT persisted to
+                            // Linear and last_local_hash stays at its old value,
+                            // so this task still reads as "locally changed". If a
+                            // remote change lands before the next sync, Phase 1
+                            // will treat it as a conflict and, under RemoteWins,
+                            // silently discard this unpushed local edit. Surface
+                            // it loudly so the operator can re-run before that.
+                            stats.errors.push(format!(
+                                "Failed to update {} ({}): {} -- local change left unpushed; \
+                                 re-run sync before any remote edit or it may be lost under remote-wins",
+                                task.id, task.title, e
+                            ));
+                        }
                     }
                 }
             }
