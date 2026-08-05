@@ -834,3 +834,30 @@ fn test_followup_close_hint_fires() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("open follow-up"));
 }
+
+#[test]
+fn test_followup_close_hint_ignores_in_progress() {
+    let temp = TempDir::new().unwrap();
+    let _ = myc_cmd(&temp).arg("init").output().expect("init");
+    let _ = myc_cmd(&temp)
+        .args(["task", "create", "--title", "Some task"])
+        .output()
+        .expect("task create");
+    let _ = myc_cmd(&temp)
+        .args(["followup", "add", "already being worked on"])
+        .output()
+        .expect("fu add");
+    let _ = myc_cmd(&temp)
+        .args(["followup", "start", "1"])
+        .output()
+        .expect("fu start");
+
+    let out = myc_cmd(&temp)
+        .args(["task", "close", "1"])
+        .output()
+        .expect("task close");
+    print_output(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // in_progress follow-ups are already being worked — no close-time nudge.
+    assert!(!stdout.contains("open follow-up"));
+}

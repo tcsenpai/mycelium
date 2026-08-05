@@ -361,13 +361,14 @@ pub fn print_close_hint() {
     let Ok(counts) = db.count_followups() else {
         return;
     };
-    let active = counts.active();
-    if active == 0 {
+    // ponytail: only nudge on `open` — in_progress items are already being
+    // worked, no need to remind at task close.
+    if counts.open == 0 {
         return;
     }
     println!(
         "{} {} open follow-up(s) — run `myc followup list` to review",
         WARNING_PREFIX.yellow(),
-        active
+        counts.open
     );
 }
