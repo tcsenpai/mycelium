@@ -123,9 +123,11 @@ MUST:
 
 1. Run `myc followup list --format json` (or `myc followup count
    --format json`).
-2. If `active > 0`, surface them to the user before wrapping:
+2. If `open > 0`, surface those to the user before wrapping:
    > "Before we wrap — N open follow-up(s): [titles/bodies]. Want me to
    > handle any now, or leave for later?"
+   Count only `open`, not `active`: `in_progress` items are already
+   being worked and don't need an end-of-task decision.
 3. **Never silently process them.** Always ask.
 
 `myc task close` itself also prints a one-line reminder (only for open
