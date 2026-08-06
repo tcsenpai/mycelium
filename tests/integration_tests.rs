@@ -218,7 +218,7 @@ fn test_epic_create() {
     print_output(&output);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Created epic #1"));
+    assert!(stdout.contains("Created epic E1"));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn test_task_create() {
     print_output(&output);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Created task #1"));
+    assert!(stdout.contains("Created task T1"));
 }
 
 #[test]
@@ -801,7 +801,7 @@ fn test_followup_promote_to_task() {
         .expect("show fu");
     let body = String::from_utf8_lossy(&out.stdout);
     assert!(body.contains("\"status\": \"done\""));
-    assert!(body.contains("Promoted to task #1"));
+    assert!(body.contains("Promoted to task T1"));
 
     // Task should exist with the title
     let out = myc_cmd(&temp)

@@ -1,5 +1,5 @@
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, INFO_PREFIX, SUCCESS_PREFIX};
+use crate::commands::{eid, ensure_initialized, tid, INFO_PREFIX, SUCCESS_PREFIX};
 use crate::error::Result;
 use crate::models::Status;
 use colored::Colorize;
@@ -25,9 +25,9 @@ pub fn create(
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&epic)?),
         OutputFormat::Table => {
             println!(
-                "{} Created epic #{}: {}",
+                "{} Created epic {}: {}",
                 SUCCESS_PREFIX.green(),
-                epic.id.to_string().cyan(),
+                eid(epic.id).cyan(),
                 epic.title.bold()
             );
         }
@@ -74,7 +74,7 @@ pub fn list(format: &OutputFormat, quiet: bool) -> Result<()> {
                 };
 
                 table.add_row(vec![
-                    summary.epic.id.to_string(),
+                    eid(summary.epic.id),
                     summary.epic.title,
                     format!("{} {}", status_emoji, summary.epic.status),
                     summary.total_tasks.to_string(),
@@ -117,11 +117,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&data)?);
         }
         OutputFormat::Table => {
-            println!(
-                "{} Epic #{}",
-                INFO_PREFIX.blue(),
-                epic.id.to_string().cyan().bold()
-            );
+            println!("{} Epic {}", INFO_PREFIX.blue(), eid(epic.id).cyan().bold());
             println!("  Title: {}", epic.title.bold());
             if let Some(desc) = &epic.description {
                 println!("  Description: {}", desc);
@@ -148,7 +144,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
 
                 for task in tasks {
                     table.add_row(vec![
-                        task.id.to_string(),
+                        tid(task.id),
                         task.title,
                         format!("{} {}", task.status.emoji(), task.status),
                         format!("{} {}", task.priority.emoji(), task.priority),
@@ -197,9 +193,9 @@ pub fn update(
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&epic)?),
         OutputFormat::Table => {
             println!(
-                "{} Updated epic #{}: {}",
+                "{} Updated epic {}: {}",
                 SUCCESS_PREFIX.green(),
-                epic.id.to_string().cyan(),
+                eid(epic.id).cyan(),
                 epic.title.bold()
             );
         }
@@ -228,8 +224,8 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
             tasks.len()
         );
         if !crate::commands::confirm(&format!(
-            "Delete epic #{} and detach those tasks from the epic?",
-            id
+            "Delete epic {} and detach those tasks from the epic?",
+            eid(id)
         )) {
             println!("Cancelled.");
             return Ok(());
@@ -240,9 +236,9 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
 
     if !quiet {
         println!(
-            "{} Deleted epic #{}: {}",
+            "{} Deleted epic {}: {}",
             SUCCESS_PREFIX.green(),
-            id.to_string().cyan(),
+            eid(id).cyan(),
             epic.title
         );
     }
@@ -270,10 +266,10 @@ pub fn add_note(epic_id: i64, content: &str, format: &OutputFormat, quiet: bool)
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&note)?),
         OutputFormat::Table => {
             println!(
-                "{} Added note #{} to epic #{}: {}",
+                "{} Added note #{} to epic {}: {}",
                 SUCCESS_PREFIX.green(),
                 note.id.to_string().cyan(),
-                epic_id.to_string().cyan(),
+                eid(epic_id).cyan(),
                 epic.title.bold()
             );
         }
@@ -304,9 +300,9 @@ pub fn show_notes(epic_id: i64, format: &OutputFormat, quiet: bool) -> Result<()
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&notes)?),
         OutputFormat::Table => {
             println!(
-                "{} Notes for epic #{}: {}",
+                "{} Notes for epic {}: {}",
                 INFO_PREFIX.blue(),
-                epic_id.to_string().cyan(),
+                eid(epic_id).cyan(),
                 epic.title.bold()
             );
 

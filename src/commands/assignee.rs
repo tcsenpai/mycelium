@@ -1,5 +1,5 @@
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
+use crate::commands::{aid, ensure_initialized, tid, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
 use crate::error::Result;
 use colored::Colorize;
 use comfy_table::{ContentArrangement, Table};
@@ -23,9 +23,9 @@ pub fn create(
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&assignee)?),
         OutputFormat::Table => {
             println!(
-                "{} Created assignee #{}: {}",
+                "{} Created assignee {}: {}",
                 SUCCESS_PREFIX.green(),
-                assignee.id.to_string().cyan(),
+                aid(assignee.id).cyan(),
                 assignee.name.bold()
             );
         }
@@ -65,7 +65,7 @@ pub fn list(format: &OutputFormat, quiet: bool) -> Result<()> {
                 let tasks = format!("{} / {}", stat.open_tasks, stat.total_tasks);
 
                 table.add_row(vec![
-                    stat.assignee.id.to_string(),
+                    aid(stat.assignee.id),
                     stat.assignee.name,
                     email,
                     github,
@@ -106,9 +106,9 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
         }
         OutputFormat::Table => {
             println!(
-                "{} Assignee #{}",
+                "{} Assignee {}",
                 INFO_PREFIX.blue(),
-                assignee.id.to_string().cyan().bold()
+                aid(assignee.id).cyan().bold()
             );
             println!("  Name: {}", assignee.name.bold());
             if let Some(email) = &assignee.email {
@@ -128,7 +128,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
 
                 for task in tasks {
                     table.add_row(vec![
-                        task.id.to_string(),
+                        tid(task.id),
                         task.title,
                         format!("{} {}", task.status.emoji(), task.status),
                         format!("{} {}", task.priority.emoji(), task.priority),
@@ -162,8 +162,8 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
             tasks.len()
         );
         if !crate::commands::confirm(&format!(
-            "Delete assignee #{}? Tasks will be unassigned.",
-            id
+            "Delete assignee {}? Tasks will be unassigned.",
+            aid(id)
         )) {
             println!("Cancelled.");
             return Ok(());
@@ -174,9 +174,9 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
 
     if !quiet {
         println!(
-            "{} Deleted assignee #{}: {}",
+            "{} Deleted assignee {}: {}",
             SUCCESS_PREFIX.green(),
-            id.to_string().cyan(),
+            aid(id).cyan(),
             assignee.name
         );
     }

@@ -21,7 +21,7 @@ Hindsight bank named in `.bank` (do not edit by hand).
   `~/.claude/hindsight-memory.enabled`.
 <!-- hindsight-memory:end -->
 
-<!-- myc:agents-start v=4 -->
+<!-- myc:agents-start v=5 -->
 ## Project Management with Mycelium
 
 This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
@@ -84,6 +84,29 @@ myc export csv
 - **Assignee**: Person assigned to a task (can have GitHub username)
 - **External Ref**: Link to GitHub issues/PRs or URLs
 
+### ID Prefixes (v5)
+
+Each entity has its **own** integer sequence, so a bare number is ambiguous
+across categories. Mycelium now **displays** IDs with a one-letter category
+prefix so they can't be confused:
+
+| Category | Prefix | Example |
+|---|---|---|
+| Epic | `E` | `E3` |
+| Task | `T` | `T3` |
+| Follow-up | `F` | `F3` |
+| Assignee | `A` | `A3` |
+| External ref | `R` | `R3` |
+
+**Input is backward compatible.** Every command still accepts a bare integer
+(`myc task show 3`) *and* the prefixed form (`myc task show T3`,
+case-insensitive). Passing the **wrong** category prefix is a hard error with a
+hint — e.g. `myc task show E3` tells you `E3` is an epic and suggests
+`myc epic show E3`. This catches copy/paste mix-ups.
+
+`--format json` output is unchanged: the `id` field stays a raw integer, so
+existing scripts and the Linear sync keep working.
+
 ### Git Tracking
 
 The `.mycelium/` directory contains the SQLite database and should be committed to git:
@@ -133,13 +156,16 @@ MUST:
 
 1. Run `myc followup list --format json` (or `myc followup count
    --format json`).
-2. If `active > 0`, surface them to the user before wrapping:
+2. If `open > 0`, surface those to the user before wrapping:
    > "Before we wrap — N open follow-up(s): [titles/bodies]. Want me to
    > handle any now, or leave for later?"
+   Count only `open`, not `active`: `in_progress` items are already
+   being worked and don't need an end-of-task decision.
 3. **Never silently process them.** Always ask.
 
-`myc task close` itself also prints a one-line reminder, but the agent
-should still proactively check.
+`myc task close` itself also prints a one-line reminder (only for open
+follow-ups older than ~60s; fresh or in_progress ones stay silent), but
+the agent should still proactively check.
 
 Use `myc followup add` during work to capture anything you notice but
 shouldn't act on right now.

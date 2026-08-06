@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 4;
+const AGENTS_MD_VERSION: u32 = 5;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -73,6 +73,29 @@ myc export csv
 - **Dependency**: Task A blocks Task B (B cannot close until A is closed)
 - **Assignee**: Person assigned to a task (can have GitHub username)
 - **External Ref**: Link to GitHub issues/PRs or URLs
+
+### ID Prefixes (v5)
+
+Each entity has its **own** integer sequence, so a bare number is ambiguous
+across categories. Mycelium now **displays** IDs with a one-letter category
+prefix so they can't be confused:
+
+| Category | Prefix | Example |
+|---|---|---|
+| Epic | `E` | `E3` |
+| Task | `T` | `T3` |
+| Follow-up | `F` | `F3` |
+| Assignee | `A` | `A3` |
+| External ref | `R` | `R3` |
+
+**Input is backward compatible.** Every command still accepts a bare integer
+(`myc task show 3`) *and* the prefixed form (`myc task show T3`,
+case-insensitive). Passing the **wrong** category prefix is a hard error with a
+hint — e.g. `myc task show E3` tells you `E3` is an epic and suggests
+`myc epic show E3`. This catches copy/paste mix-ups.
+
+`--format json` output is unchanged: the `id` field stays a raw integer, so
+existing scripts and the Linear sync keep working.
 
 ### Git Tracking
 

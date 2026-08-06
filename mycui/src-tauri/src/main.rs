@@ -647,10 +647,10 @@ async fn close_task(
     if !blockers.is_empty() {
         let blocker_list = blockers
             .iter()
-            .map(|task| format!("#{} {}", task.id, task.title))
+            .map(|task| format!("T{} {}", task.id, task.title))
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(format!("Task #{id} is blocked by {blocker_list}"));
+        return Err(format!("Task T{id} is blocked by {blocker_list}"));
     }
     // Forced: the blocker check just ran above, with a UI-specific message.
     let updated = db
@@ -965,7 +965,7 @@ async fn append_followup(
     let existing = db
         .get_followup(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Follow-up #{id} not found"))?;
+        .ok_or_else(|| format!("Follow-up F{id} not found"))?;
 
     let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M %z");
     let new_body = if existing.body.trim().is_empty() {

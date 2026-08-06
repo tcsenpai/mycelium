@@ -1,6 +1,6 @@
 [package]
 name = "mycelium-manager-core"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2021"
 authors = ["Mycelium Contributors"]
 description = "Shared data layer (db, models, migrations, errors) for the Mycelium task manager"

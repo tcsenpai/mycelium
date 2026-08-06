@@ -1,6 +1,7 @@
 use crate::cli::OutputFormat;
 use crate::commands::{
-    confirm, ensure_initialized, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX,
+    aid, confirm, eid, ensure_initialized, rid, tid, ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX,
+    WARNING_PREFIX,
 };
 use crate::error::Result;
 use crate::models::external_ref::parse_github_ref;
@@ -64,9 +65,9 @@ pub fn create(
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&task)?),
         OutputFormat::Table => {
             println!(
-                "{} Created task #{}: {}",
+                "{} Created task {}: {}",
                 SUCCESS_PREFIX.green(),
-                task.id.to_string().cyan(),
+                tid(task.id).cyan(),
                 task.title.bold()
             );
         }
@@ -257,10 +258,10 @@ fn print_task_tree(
         if let Some(task) = task_map.get(&task_id) {
             let connector = if is_last { "└── " } else { "├── " };
             println!(
-                "{}{}#{}: {} (circular)",
+                "{}{}{}: {} (circular)",
                 prefix,
                 connector,
-                task_id,
+                tid(task_id),
                 task.title.dimmed()
             );
         }
@@ -287,7 +288,7 @@ fn print_task_tree(
 
         let epic_str = task
             .epic_id
-            .map(|id| format!(" [E#{}]", id))
+            .map(|id| format!(" [{}]", eid(id)))
             .unwrap_or_default();
 
         let overdue_str = if task.is_overdue() {
@@ -311,7 +312,7 @@ fn print_task_tree(
                     " [blocked by {}]",
                     open_blockers
                         .iter()
-                        .map(|id| format!("#{}", id))
+                        .map(|id| tid(**id))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -391,7 +392,7 @@ fn print_grouped_view(tasks: &[crate::models::Task], epic_map: &HashMap<i64, Epi
         for epic in &all_epics {
             let task_count = tasks.iter().filter(|t| t.epic_id == Some(epic.id)).count();
             epic_table.add_row(vec![
-                format!("E#{}", epic.id).cyan().to_string(),
+                eid(epic.id).cyan().to_string(),
                 epic.title.clone(),
                 format!("{} {}", epic.status.emoji(), epic.status),
                 format!("{} tasks", task_count),
@@ -436,7 +437,7 @@ fn print_grouped_view(tasks: &[crate::models::Task], epic_map: &HashMap<i64, Epi
                         println!(
                             "\n{} {} {} {}",
                             status_icon,
-                            format!("E#{}:", id).cyan().bold(),
+                            format!("{}:", eid(id)).cyan().bold(),
                             epic.title.bold(),
                             format!("({} tasks)", tasks_in_epic.len()).dimmed()
                         );
@@ -444,7 +445,7 @@ fn print_grouped_view(tasks: &[crate::models::Task], epic_map: &HashMap<i64, Epi
                         println!(
                             "\n{} {} {}",
                             "📂".cyan(),
-                            format!("E#{}:", id).cyan().bold(),
+                            format!("{}:", eid(id)).cyan().bold(),
                             format!("(Unknown epic, {} tasks)", tasks_in_epic.len()).dimmed()
                         );
                     }
@@ -497,7 +498,7 @@ fn print_grouped_view(tasks: &[crate::models::Task], epic_map: &HashMap<i64, Epi
                     .unwrap_or_else(|| "-".to_string());
 
                 table.add_row(vec![
-                    format!("#{}", task.id).dimmed().to_string(),
+                    tid(task.id).dimmed().to_string(),
                     task.title.clone(),
                     format!("{} {}", task.status.emoji(), task.status),
                     format!("{} {}", task.priority.emoji(), task.priority),
@@ -564,11 +565,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&data)?);
         }
         OutputFormat::Table => {
-            println!(
-                "{} Task #{}",
-                INFO_PREFIX.blue(),
-                task.id.to_string().cyan().bold()
-            );
+            println!("{} Task {}", INFO_PREFIX.blue(), tid(task.id).cyan().bold());
             println!("  Title: {}", task.title.bold());
             if let Some(desc) = &task.description {
                 println!("  Description: {}", desc);
@@ -612,7 +609,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
                     "  Blocked by: {}",
                     blocking
                         .iter()
-                        .map(|id| format!("#{}", id))
+                        .map(|id| tid(*id))
                         .collect::<Vec<_>>()
                         .join(", ")
                 );
@@ -622,7 +619,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
                     "  Blocks: {}",
                     blocked_by
                         .iter()
-                        .map(|id| format!("#{}", id))
+                        .map(|id| tid(*id))
                         .collect::<Vec<_>>()
                         .join(", ")
                 );
@@ -695,9 +692,9 @@ pub fn update(
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&task)?),
         OutputFormat::Table => {
             println!(
-                "{} Updated task #{}: {}",
+                "{} Updated task {}: {}",
                 SUCCESS_PREFIX.green(),
-                task.id.to_string().cyan(),
+                tid(task.id).cyan(),
                 task.title.bold()
             );
         }
@@ -716,7 +713,7 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
         })?;
 
     if !force {
-        if !crate::commands::confirm(&format!("Delete task #{}: '{}'", id, task.title)) {
+        if !crate::commands::confirm(&format!("Delete task {}: '{}'", tid(id), task.title)) {
             println!("Cancelled.");
             return Ok(());
         }
@@ -726,9 +723,9 @@ pub fn delete(id: i64, force: bool, quiet: bool) -> Result<()> {
 
     if !quiet {
         println!(
-            "{} Deleted task #{}: {}",
+            "{} Deleted task {}: {}",
             SUCCESS_PREFIX.green(),
-            id.to_string().cyan(),
+            tid(id).cyan(),
             task.title
         );
     }
@@ -760,13 +757,17 @@ pub fn assign(task_id: i64, assignee_id: i64, quiet: bool) -> Result<()> {
 
     if !quiet {
         if assignee_id == 0 {
-            println!("{} Unassigned task #{}", SUCCESS_PREFIX.green(), task_id);
+            println!(
+                "{} Unassigned task {}",
+                SUCCESS_PREFIX.green(),
+                tid(task_id)
+            );
         } else {
             println!(
-                "{} Assigned task #{} to assignee #{}",
+                "{} Assigned task {} to assignee {}",
                 SUCCESS_PREFIX.green(),
-                task_id,
-                assignee_id
+                tid(task_id),
+                aid(assignee_id)
             );
         }
     }
@@ -787,9 +788,9 @@ pub fn link_github_issue(task_id: i64, reference: &str, quiet: bool) -> Result<(
 
     if !quiet {
         println!(
-            "{} Linked task #{} to GitHub issue {}",
+            "{} Linked task {} to GitHub issue {}",
             SUCCESS_PREFIX.green(),
-            task_id,
+            tid(task_id),
             reference.cyan()
         );
     }
@@ -810,9 +811,9 @@ pub fn link_github_pr(task_id: i64, reference: &str, quiet: bool) -> Result<()> 
 
     if !quiet {
         println!(
-            "{} Linked task #{} to GitHub PR {}",
+            "{} Linked task {} to GitHub PR {}",
             SUCCESS_PREFIX.green(),
-            task_id,
+            tid(task_id),
             reference.cyan()
         );
     }
@@ -826,9 +827,9 @@ pub fn link_url(task_id: i64, url: &str, quiet: bool) -> Result<()> {
 
     if !quiet {
         println!(
-            "{} Linked task #{} to URL {}",
+            "{} Linked task {} to URL {}",
             SUCCESS_PREFIX.green(),
-            task_id,
+            tid(task_id),
             url.cyan()
         );
     }
@@ -842,10 +843,10 @@ pub fn link_blocks(task_id: i64, blocked_id: i64, quiet: bool) -> Result<()> {
 
     if !quiet {
         println!(
-            "{} Task #{} now blocks task #{}",
+            "{} Task {} now blocks task {}",
             SUCCESS_PREFIX.green(),
-            task_id,
-            blocked_id
+            tid(task_id),
+            tid(blocked_id)
         );
     }
     Ok(())
@@ -860,7 +861,7 @@ pub fn unlink_ref(ref_id: i64, quiet: bool) -> Result<()> {
         println!(
             "{} Removed external reference {}",
             SUCCESS_PREFIX.green(),
-            ref_id
+            rid(ref_id)
         );
     }
     Ok(())
@@ -881,12 +882,12 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
     let blockers = db.get_open_blockers(id)?;
     if !blockers.is_empty() && !force {
         println!(
-            "{} Cannot close task #{} - blocked by:",
+            "{} Cannot close task {} - blocked by:",
             ERROR_PREFIX.red(),
-            id
+            tid(id)
         );
         for blocker in &blockers {
-            println!("  - #{}: {}", blocker.id, blocker.title);
+            println!("  - {}: {}", tid(blocker.id), blocker.title);
         }
         println!("\nUse --force to close anyway (or resolve the blockers first).");
         return Ok(());
@@ -909,9 +910,9 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
 
     if !quiet {
         println!(
-            "{} Closed task #{}: {}",
+            "{} Closed task {}: {}",
             SUCCESS_PREFIX.green(),
-            id,
+            tid(id),
             updated.title
         );
         crate::commands::followup::print_close_hint();
@@ -939,9 +940,9 @@ pub fn reopen(id: i64, quiet: bool) -> Result<()> {
 
     if !quiet {
         println!(
-            "{} Reopened task #{}: {}",
+            "{} Reopened task {}: {}",
             SUCCESS_PREFIX.green(),
-            id,
+            tid(id),
             updated.title
         );
     }
@@ -1046,7 +1047,7 @@ pub fn batch(file_path: &str, format: &OutputFormat, quiet: bool) -> Result<()> 
                     created_ids.len()
                 );
                 for id in &created_ids {
-                    println!("  - Task #{}", id);
+                    println!("  - Task {}", tid(*id));
                 }
             }
         }
@@ -1182,10 +1183,10 @@ pub fn add_note(task_id: i64, content: &str, format: &OutputFormat, quiet: bool)
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&note)?),
         OutputFormat::Table => {
             println!(
-                "{} Added note #{} to task #{}: {}",
+                "{} Added note #{} to task {}: {}",
                 SUCCESS_PREFIX.green(),
                 note.id.to_string().cyan(),
-                task_id.to_string().cyan(),
+                tid(task_id).cyan(),
                 task.title.bold()
             );
         }
@@ -1218,9 +1219,9 @@ pub fn show_notes(task_id: i64, format: &OutputFormat, quiet: bool) -> Result<()
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&notes)?),
         OutputFormat::Table => {
             println!(
-                "{} Notes for task #{}: {}",
+                "{} Notes for task {}: {}",
                 INFO_PREFIX.blue(),
-                task_id.to_string().cyan(),
+                tid(task_id).cyan(),
                 task.title.bold()
             );
 
@@ -1272,10 +1273,10 @@ pub fn clone_task(
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&new_task)?),
         OutputFormat::Table => {
             println!(
-                "{} Cloned task #{} to #{}: {}",
+                "{} Cloned task {} to {}: {}",
                 SUCCESS_PREFIX.green(),
-                task_id.to_string().cyan(),
-                new_task.id.to_string().cyan().bold(),
+                tid(task_id).cyan(),
+                tid(new_task.id).cyan().bold(),
                 new_task.title.bold()
             );
             println!("  Original: {}", original.title.dimmed());
@@ -1303,7 +1304,7 @@ pub fn batch_close(task_ids: &[i64], force: bool, quiet: bool) -> Result<()> {
                 outcome.closed.len()
             );
             for task in &outcome.closed {
-                println!("  - #{}: {}", task.id, task.title);
+                println!("  - {}: {}", tid(task.id), task.title);
             }
         }
 
@@ -1311,7 +1312,7 @@ pub fn batch_close(task_ids: &[i64], force: bool, quiet: bool) -> Result<()> {
             let ids = outcome
                 .blocked
                 .iter()
-                .map(|id| format!("#{}", id))
+                .map(|id| tid(*id))
                 .collect::<Vec<_>>()
                 .join(" ");
             println!(
@@ -1334,7 +1335,7 @@ pub fn batch_close(task_ids: &[i64], force: bool, quiet: bool) -> Result<()> {
             let ids = outcome
                 .not_found
                 .iter()
-                .map(|id| format!("#{}", id))
+                .map(|id| tid(*id))
                 .collect::<Vec<_>>()
                 .join(" ");
             println!(
@@ -1370,12 +1371,12 @@ pub fn batch_tag(tag: &str, task_ids: &[i64], quiet: bool) -> Result<()> {
             updated_tasks.len()
         );
         for task in &updated_tasks {
-            println!("  - #{}: {}", task.id, task.title);
+            println!("  - {}: {}", tid(task.id), task.title);
         }
         if !not_found.is_empty() {
             let ids = not_found
                 .iter()
-                .map(|id| format!("#{}", id))
+                .map(|id| tid(*id))
                 .collect::<Vec<_>>()
                 .join(" ");
             println!(
@@ -1402,10 +1403,10 @@ pub fn batch_move(epic_id: i64, task_ids: &[i64], quiet: bool) -> Result<()> {
     let epic_id_opt = if epic_id == 0 { None } else { Some(epic_id) };
 
     // Get epic name for display
-    let epic_name = if let Some(eid) = epic_id_opt {
-        match db.get_epic(eid)? {
-            Some(epic) => format!("E#{}: {}", eid, epic.title),
-            None => format!("E#{} (not found)", eid),
+    let epic_name = if let Some(eid_val) = epic_id_opt {
+        match db.get_epic(eid_val)? {
+            Some(epic) => format!("{}: {}", eid(eid_val), epic.title),
+            None => format!("{} (not found)", eid(eid_val)),
         }
     } else {
         "No Epic".to_string()
@@ -1421,12 +1422,12 @@ pub fn batch_move(epic_id: i64, task_ids: &[i64], quiet: bool) -> Result<()> {
             epic_name.cyan()
         );
         for task in &updated_tasks {
-            println!("  - #{}: {}", task.id, task.title);
+            println!("  - {}: {}", tid(task.id), task.title);
         }
         if !not_found.is_empty() {
             let ids = not_found
                 .iter()
-                .map(|id| format!("#{}", id))
+                .map(|id| tid(*id))
                 .collect::<Vec<_>>()
                 .join(" ");
             println!(
@@ -1459,7 +1460,7 @@ pub fn batch_delete_orphans(force: bool, quiet: bool) -> Result<()> {
             orphans.len()
         );
         for task in &orphans {
-            println!("  - #{}: {} [{}]", task.id, task.title, task.status);
+            println!("  - {}: {} [{}]", tid(task.id), task.title, task.status);
         }
     }
 
