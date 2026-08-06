@@ -6,7 +6,9 @@
 
 pub mod db;
 pub mod error;
+pub mod id;
 pub mod models;
 
 pub use db::Database;
 pub use error::{MyceliumError, Result};
+pub use id::{format_id, parse_id, IdKind};

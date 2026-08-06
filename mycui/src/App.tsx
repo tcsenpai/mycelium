@@ -72,7 +72,7 @@ import type {
   Status,
   Task,
 } from './lib/types';
-import { followupStatusColors, followupStatusLabels } from './lib/types';
+import { displayId, followupStatusColors, followupStatusLabels } from './lib/types';
 
 const QUERY_KEYS = {
   path: ['current-path'],
@@ -195,11 +195,11 @@ function EpicChip({
       className={`epic-chip ${isSelected ? 'is-active' : ''} ${epic.is_done ? 'is-done' : ''}`}
       type="button"
       onClick={onToggle}
-      title={`#${epic.id} ${epic.title} — ${epic.is_done ? 'complete' : `${epic.open_tasks} open`} (${progress}%)`}
+      title={`${displayId('epic', epic.id)} ${epic.title} — ${epic.is_done ? 'complete' : `${epic.open_tasks} open`} (${progress}%)`}
       aria-pressed={isSelected}
     >
       <span className="epic-chip-row">
-        <span className="epic-num">#{epic.id}</span>
+        <span className="epic-num">{displayId('epic', epic.id)}</span>
         <span className="epic-chip-title">{epic.title}</span>
         <span className="epic-chip-meta">{epic.is_done ? 'done' : epic.open_tasks}</span>
       </span>
@@ -1420,7 +1420,7 @@ function App() {
         if (undoTimerRef.current) {
           clearTimeout(undoTimerRef.current);
         }
-        setUndoToast({ message: `#${taskId}: ${summaries.join(', ')}`, taskId, revert });
+        setUndoToast({ message: `${displayId('task', taskId)}: ${summaries.join(', ')}`, taskId, revert });
         undoTimerRef.current = setTimeout(() => setUndoToast(null), 6000);
       }
     }
@@ -2065,7 +2065,7 @@ function App() {
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">Selected task</p>
-                  <h3>{selectedTask ? `#${selectedTask.id}` : 'Nothing selected'}</h3>
+                  <h3>{selectedTask ? displayId('task', selectedTask.id) : 'Nothing selected'}</h3>
                 </div>
                 {selectedTask ? (
                   <button
@@ -2177,7 +2177,7 @@ function App() {
                         <option value="">No epic</option>
                         {epics.map((epic) => (
                           <option key={epic.id} value={epic.id}>
-                            #{epic.id} {epic.title}
+                            {displayId('epic', epic.id)} {epic.title}
                           </option>
                         ))}
                       </select>
@@ -2417,7 +2417,7 @@ function App() {
                   return (
                     <div key={epic.id} className="epic-lane">
                       <div className="epic-lane-head">
-                        <strong><span className="epic-num">#{epic.id}</span> {epic.title}</strong>
+                        <strong><span className="epic-num">{displayId('epic', epic.id)}</span> {epic.title}</strong>
                         <span>{epic.open_tasks} open • {done}/{epic.total_tasks} closed</span>
                       </div>
                       <div className="epic-lane-track">
@@ -2873,7 +2873,7 @@ function TaskRow({
       </div>
 
       <div className="task-row-side">
-        <span className="task-row-id">#{task.id}</span>
+        <span className="task-row-id">{displayId('task', task.id)}</span>
         {compact ? statusButton : null}
         {due ? <span className={`due-pill ${due.tone}`}>{due.label}</span> : null}
         {compact ? null : <span className="task-row-updated">{formatDate(task.updated_at)}</span>}
@@ -2995,7 +2995,7 @@ function buildProjectContext(
     for (const epic of epics) {
       const done = epic.total_tasks - epic.open_tasks;
       lines.push(
-        `  #${epic.id} ${epic.title} — ${done}/${epic.total_tasks} closed` +
+        `  ${displayId('epic', epic.id)} ${epic.title} — ${done}/${epic.total_tasks} closed` +
           `${epic.is_done ? ' [complete]' : ''}`
       );
     }
@@ -3006,8 +3006,8 @@ function buildProjectContext(
 
   lines.push('TASKS');
   for (const task of tasks) {
-    const bits = [`#${task.id}`, `[${task.status}]`, `[${task.priority}]`, task.title];
-    if (task.epic_id) bits.push(`epic:#${task.epic_id}`);
+    const bits = [displayId('task', task.id), `[${task.status}]`, `[${task.priority}]`, task.title];
+    if (task.epic_id) bits.push(`epic:${displayId('epic', task.epic_id)}`);
     if (task.assignee_id) bits.push(`owner:${assigneeName.get(task.assignee_id) ?? task.assignee_id}`);
     if (task.due_date) {
       const delta = dueDelta(task);
@@ -3440,10 +3440,10 @@ function EpicBoardCardView({
       type="button"
       className={`epic-board-card ${isSelected ? 'is-selected' : ''}`}
       onClick={onOpen}
-      title={`Open #${card.id} ${card.title} in Overview`}
+      title={`Open ${displayId('epic', card.id)} ${card.title} in Overview`}
     >
       <span className="epic-board-card-head">
-        <span className="epic-num">#{card.id}</span>
+        <span className="epic-num">{displayId('epic', card.id)}</span>
         <span className="epic-board-card-title">{card.title}</span>
       </span>
 
@@ -3551,7 +3551,7 @@ function EpicSlate({
             <div className="slate-lane-head">
               <div className="slate-lane-title">
                 <strong>
-                  {lane.id >= 0 ? <span className="epic-num">#{lane.id}</span> : null} {lane.title}
+                  {lane.id >= 0 ? <span className="epic-num">{displayId('epic', lane.id)}</span> : null} {lane.title}
                 </strong>
                 <span>{done}/{total} closed</span>
               </div>
@@ -3570,7 +3570,7 @@ function EpicSlate({
                   title={task.title}
                 >
                   <span className={`priority-pill-dot is-${task.priority}`} />
-                  <span className="slate-chip-id">#{task.id}</span>
+                  <span className="slate-chip-id">{displayId('task', task.id)}</span>
                   <span className="slate-chip-title">{task.title}</span>
                 </button>
               ))}
@@ -3637,13 +3637,13 @@ function TaskEditModal({
         className="modal-card"
         role="dialog"
         aria-modal="true"
-        aria-label={`Edit task #${task.id}`}
+        aria-label={`Edit task ${displayId('task', task.id)}`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="panel-head modal-head">
           <div>
             <p className="eyebrow">Edit task</p>
-            <h3>#{task.id}</h3>
+            <h3>{displayId('task', task.id)}</h3>
           </div>
           <button className="ghost-button" type="button" onClick={onClose}>
             <X size={16} />
@@ -3700,7 +3700,7 @@ function TaskEditModal({
               <option value="">No epic</option>
               {epics.map((epic) => (
                 <option key={epic.id} value={String(epic.id)}>
-                  #{epic.id} {epic.title}
+                  {displayId('epic', epic.id)} {epic.title}
                 </option>
               ))}
             </select>
@@ -3833,7 +3833,7 @@ function DependencyGraph({
               transform={`translate(${node.x}, ${node.y})`}
               role="button"
               tabIndex={0}
-              aria-label={`Task #${node.id}: ${node.title}. ${node.blocks.length} blocking, ${node.blockedBy.length} blockers.`}
+              aria-label={`Task ${displayId('task', node.id)}: ${node.title}. ${node.blocks.length} blocking, ${node.blockedBy.length} blockers.`}
               onMouseEnter={() => setHoveredNodeId(node.id)}
               onMouseLeave={() => setHoveredNodeId((current) => (current === node.id ? null : current))}
               onFocus={() => setHoveredNodeId(node.id)}
@@ -3846,7 +3846,7 @@ function DependencyGraph({
               }}
             >
               <rect x="-34" y="-24" width="68" height="48" rx="18" />
-              <text textAnchor="middle" y="-5">#{node.id}</text>
+              <text textAnchor="middle" y="-5">{displayId('task', node.id)}</text>
               <text textAnchor="middle" y="9" className="dependency-node-title">
                 {node.title.length > 16 ? `${node.title.slice(0, 16)}…` : node.title}
               </text>
@@ -3863,7 +3863,7 @@ function DependencyGraph({
             <div className="dependency-spotlight-head">
               <div>
                 <p className="eyebrow">Focused task</p>
-                <h4>#{activeTask.id} {activeTask.title}</h4>
+                <h4>{displayId('task', activeTask.id)} {activeTask.title}</h4>
               </div>
               <span className={`priority-chip is-${activeTask.priority}`}>
                 {priorityLabel(activeTask.priority)}
@@ -3885,7 +3885,7 @@ function DependencyGraph({
                 title="Blocked by"
                 emptyMessage="No blockers in scope."
                 items={(activeLinks?.blockedBy ?? []).slice(0, 4).map((task) => ({
-                  label: `#${task.id} ${task.title}`,
+                  label: `${displayId('task', task.id)} ${task.title}`,
                   meta: statusLabel(task.status),
                   onClick: () => setHoveredNodeId(task.id),
                 }))}
@@ -3894,7 +3894,7 @@ function DependencyGraph({
                 title="Blocking"
                 emptyMessage="Not blocking other tasks in scope."
                 items={(activeLinks?.blocks ?? []).slice(0, 4).map((task) => ({
-                  label: `#${task.id} ${task.title}`,
+                  label: `${displayId('task', task.id)} ${task.title}`,
                   meta: statusLabel(task.status),
                   onClick: () => setHoveredNodeId(task.id),
                 }))}
@@ -4052,7 +4052,7 @@ function FollowupsView() {
   };
 
   const handleDelete = (id: number) => {
-    if (!confirm(`Delete follow-up #${id}? This cannot be undone.`)) return;
+    if (!confirm(`Delete follow-up ${displayId('followup', id)}? This cannot be undone.`)) return;
     deleteMutation.mutate(id);
   };
 
@@ -4186,7 +4186,7 @@ function FollowupCard({
         <span className={`status-pill ${followupStatusColors[followup.status]}`}>
           {followupStatusLabels[followup.status]}
         </span>
-        <span className="followup-id">#{followup.id}</span>
+        <span className="followup-id">{displayId('followup', followup.id)}</span>
         <strong className="followup-title">{display}</strong>
       </div>
       <pre className="followup-body">{followup.body}</pre>

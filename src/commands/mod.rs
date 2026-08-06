@@ -20,6 +20,26 @@ pub const SUCCESS_PREFIX: &str = "✅";
 pub const INFO_PREFIX: &str = "ℹ️";
 pub const WARNING_PREFIX: &str = "⚠️";
 
+// Category-prefixed ID display helpers (v5): T3 / E3 / F3 / A3 / R3.
+// Human-facing output only — bare-echo and JSON paths keep raw integers.
+use mycelium_core::id::{format_id, IdKind};
+
+pub fn tid(id: i64) -> String {
+    format_id(IdKind::Task, id)
+}
+pub fn eid(id: i64) -> String {
+    format_id(IdKind::Epic, id)
+}
+pub fn fid(id: i64) -> String {
+    format_id(IdKind::Followup, id)
+}
+pub fn aid(id: i64) -> String {
+    format_id(IdKind::Assignee, id)
+}
+pub fn rid(id: i64) -> String {
+    format_id(IdKind::Ref, id)
+}
+
 pub fn get_db_path() -> std::path::PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))

@@ -1,5 +1,5 @@
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, INFO_PREFIX, SUCCESS_PREFIX};
+use crate::commands::{ensure_initialized, tid, INFO_PREFIX, SUCCESS_PREFIX};
 use crate::error::Result;
 use colored::Colorize;
 
@@ -26,9 +26,9 @@ pub fn show(task_id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&chain)?),
         OutputFormat::Table => {
             println!(
-                "{} Dependency tree for task #{}: {}",
+                "{} Dependency tree for task {}: {}",
                 INFO_PREFIX.blue(),
-                task_id,
+                tid(task_id),
                 task.title.bold()
             );
             println!();
@@ -44,9 +44,9 @@ pub fn show(task_id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
                         } else {
                             "⭕".red()
                         };
-                        println!("    {} #{}: {}", status, id, t.title);
+                        println!("    {} {}: {}", status, tid(*id), t.title);
                     } else {
-                        println!("    ? #{}: (not found)", id);
+                        println!("    ? {}: (not found)", tid(*id));
                     }
                 }
             }
@@ -64,9 +64,9 @@ pub fn show(task_id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
                         } else {
                             "⭕".red()
                         };
-                        println!("    {} #{}: {}", status, id, t.title);
+                        println!("    {} {}: {}", status, tid(*id), t.title);
                     } else {
-                        println!("    ? #{}: (not found)", id);
+                        println!("    ? {}: (not found)", tid(*id));
                     }
                 }
             }
@@ -82,10 +82,10 @@ pub fn unlink(task_id: i64, blocked_task_id: i64, quiet: bool) -> Result<()> {
 
     if !quiet {
         println!(
-            "{} Task #{} no longer blocks task #{}",
+            "{} Task {} no longer blocks task {}",
             SUCCESS_PREFIX.green(),
-            task_id,
-            blocked_task_id
+            tid(task_id),
+            tid(blocked_task_id)
         );
     }
     Ok(())

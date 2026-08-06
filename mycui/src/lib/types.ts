@@ -112,3 +112,18 @@ export const followupStatusColors: Record<FollowupStatus, string> = {
   done: 'is-done',
   wontfix: 'is-wontfix',
 };
+
+// Category-prefixed entity IDs (v5), matching the `myc` CLI: T3 / E3 / F3 / A3.
+// Display only — IDs stay raw integers everywhere internally (keys, values, API args).
+export type IdKind = 'task' | 'epic' | 'followup' | 'assignee';
+
+const ID_PREFIX: Record<IdKind, string> = {
+  task: 'T',
+  epic: 'E',
+  followup: 'F',
+  assignee: 'A',
+};
+
+export function displayId(kind: IdKind, id: number): string {
+  return `${ID_PREFIX[kind]}${id}`;
+}

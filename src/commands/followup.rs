@@ -2,7 +2,9 @@ use colored::Colorize;
 use comfy_table::{ContentArrangement, Table};
 
 use crate::cli::OutputFormat;
-use crate::commands::{confirm, ensure_initialized, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
+use crate::commands::{
+    confirm, ensure_initialized, fid, tid, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX,
+};
 use crate::error::{MyceliumError, Result};
 use crate::models::{FollowupStatus, Priority};
 
@@ -23,9 +25,9 @@ pub fn add(body: &str, title: Option<&str>, format: &OutputFormat, quiet: bool) 
         OutputFormat::Table => {
             if !quiet {
                 println!(
-                    "{} Added follow-up #{}: {}",
+                    "{} Added follow-up {}: {}",
                     SUCCESS_PREFIX.green(),
-                    fu.id,
+                    fid(fu.id),
                     fu.display_title()
                 );
             } else {
@@ -85,7 +87,7 @@ pub fn list(
 
     for fu in &items {
         table.add_row(vec![
-            format!("#{}", fu.id).dimmed().to_string(),
+            fid(fu.id).dimmed().to_string(),
             format!("{} {}", fu.status.emoji(), fu.status),
             fu.display_title(),
             fu.created_at.format("%Y-%m-%d %H:%M").to_string(),
@@ -121,7 +123,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("{} Follow-up #{}", INFO_PREFIX.blue(), fu.id);
+    println!("{} Follow-up {}", INFO_PREFIX.blue(), fid(fu.id));
     if let Some(t) = &fu.title {
         if !t.is_empty() {
             println!("  Title:   {}", t.bold());
@@ -155,9 +157,9 @@ pub fn next(format: &OutputFormat, quiet: bool) -> Result<()> {
                 println!("{}", fu.id);
             } else {
                 println!(
-                    "{} Next follow-up: #{} — {}",
+                    "{} Next follow-up: {} — {}",
                     INFO_PREFIX.blue(),
-                    fu.id,
+                    fid(fu.id),
                     fu.display_title()
                 );
                 if !fu.body.trim().is_empty() {
@@ -185,9 +187,9 @@ pub fn set_status(
 
     if !quiet {
         println!(
-            "{} Follow-up #{} → {} {}",
+            "{} Follow-up {} → {} {}",
             SUCCESS_PREFIX.green(),
-            updated.id,
+            fid(updated.id),
             updated.status.emoji(),
             updated.status
         );
@@ -207,9 +209,9 @@ pub fn edit(
 
     if !quiet {
         println!(
-            "{} Follow-up #{} updated",
+            "{} Follow-up {} updated",
             SUCCESS_PREFIX.green(),
-            updated.id
+            fid(updated.id)
         );
     }
     Ok(())
@@ -242,9 +244,9 @@ pub fn append(id: i64, text: &str, quiet: bool) -> Result<()> {
     let updated = db.update_followup_body(id, Some(&new_body), None, false)?;
     if !quiet {
         println!(
-            "{} Appended to follow-up #{} ({} chars total)",
+            "{} Appended to follow-up {} ({} chars total)",
             SUCCESS_PREFIX.green(),
-            updated.id,
+            fid(updated.id),
             updated.body.len()
         );
     }
@@ -261,7 +263,7 @@ pub fn remove(id: i64, force: bool, quiet: bool) -> Result<()> {
         })?;
 
     if !force {
-        let prompt = format!("Delete follow-up #{}: {}?", fu.id, fu.display_title());
+        let prompt = format!("Delete follow-up {}: {}?", fid(fu.id), fu.display_title());
         if !confirm(&prompt) {
             if !quiet {
                 println!("{} Cancelled", INFO_PREFIX.blue());
@@ -272,7 +274,7 @@ pub fn remove(id: i64, force: bool, quiet: bool) -> Result<()> {
 
     db.delete_followup(id)?;
     if !quiet {
-        println!("{} Deleted follow-up #{}", SUCCESS_PREFIX.green(), id);
+        println!("{} Deleted follow-up {}", SUCCESS_PREFIX.green(), fid(id));
     }
     Ok(())
 }
@@ -288,8 +290,9 @@ pub fn promote(id: i64, epic: Option<i64>, priority: &str, quiet: bool) -> Resul
 
     if matches!(fu.status, FollowupStatus::Done | FollowupStatus::Wontfix) {
         return Err(MyceliumError::InvalidInput(format!(
-            "Follow-up #{} is already {} — cannot promote",
-            id, fu.status
+            "Follow-up {} is already {} — cannot promote",
+            fid(id),
+            fu.status
         )));
     }
 
@@ -307,22 +310,22 @@ pub fn promote(id: i64, epic: Option<i64>, priority: &str, quiet: bool) -> Resul
         None,
         None,
         None,
-        Some(&format!("Promoted from follow-up #{}", fu.id)),
+        Some(&format!("Promoted from follow-up {}", fid(fu.id))),
         None,
     )?;
 
     db.update_followup_status(
         id,
         FollowupStatus::Done,
-        Some(&format!("Promoted to task #{}", task.id)),
+        Some(&format!("Promoted to task {}", tid(task.id))),
     )?;
 
     if !quiet {
         println!(
-            "{} Follow-up #{} promoted to task #{}: {}",
+            "{} Follow-up {} promoted to task {}: {}",
             SUCCESS_PREFIX.green(),
-            id,
-            task.id,
+            fid(id),
+            tid(task.id),
             task.title
         );
     }

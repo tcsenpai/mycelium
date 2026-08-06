@@ -1,5 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 
+pub mod id_parser;
+
 #[derive(Parser)]
 #[command(name = "myc")]
 #[command(about = "A robust, production-grade task/plan manager CLI")]
@@ -109,6 +111,7 @@ pub enum FollowupCommands {
     /// Show a follow-up
     Show {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
     },
 
@@ -118,12 +121,14 @@ pub enum FollowupCommands {
     /// Mark a follow-up as in_progress
     Start {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
     },
 
     /// Mark a follow-up as done
     Done {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
 
         /// Optional closure reason
@@ -134,6 +139,7 @@ pub enum FollowupCommands {
     /// Mark a follow-up as wontfix
     Wontfix {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
 
         /// Optional closure reason
@@ -144,12 +150,14 @@ pub enum FollowupCommands {
     /// Reopen a follow-up
     Reopen {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
     },
 
     /// Replace body or title of a follow-up
     Edit {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
 
         /// New body (omit to keep current)
@@ -164,6 +172,7 @@ pub enum FollowupCommands {
     /// Append text to a follow-up's body (timestamped, preserves existing)
     Append {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
 
         /// Text to append
@@ -173,6 +182,7 @@ pub enum FollowupCommands {
     /// Delete a follow-up
     Rm {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
 
         /// Skip confirmation
@@ -183,10 +193,11 @@ pub enum FollowupCommands {
     /// Promote a follow-up to a full task (marks follow-up done)
     Promote {
         /// Follow-up ID
+        #[arg(value_parser = id_parser::followup_id)]
         id: i64,
 
         /// Epic ID to assign the new task to
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::epic_id)]
         epic: Option<i64>,
 
         /// Priority (low, medium, high, critical)
@@ -254,12 +265,14 @@ pub enum EpicCommands {
     /// Show epic details
     Show {
         /// Epic ID
+        #[arg(value_parser = id_parser::epic_id)]
         id: i64,
     },
 
     /// Update an epic
     Update {
         /// Epic ID
+        #[arg(value_parser = id_parser::epic_id)]
         id: i64,
 
         /// New title
@@ -290,6 +303,7 @@ pub enum EpicCommands {
     /// Add a note to an epic
     Note {
         /// Epic ID
+        #[arg(value_parser = id_parser::epic_id)]
         epic_id: i64,
 
         /// Note content
@@ -299,12 +313,14 @@ pub enum EpicCommands {
     /// Show epic notes
     Notes {
         /// Epic ID
+        #[arg(value_parser = id_parser::epic_id)]
         epic_id: i64,
     },
 
     /// Delete an epic
     Delete {
         /// Epic ID
+        #[arg(value_parser = id_parser::epic_id)]
         id: i64,
 
         /// Force deletion without confirmation
@@ -326,7 +342,7 @@ pub enum TaskCommands {
         description: Option<String>,
 
         /// Epic ID to assign to
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::epic_id)]
         epic: Option<i64>,
 
         /// Priority (low, medium, high, critical)
@@ -334,7 +350,7 @@ pub enum TaskCommands {
         priority: String,
 
         /// Assignee ID
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::assignee_id)]
         assignee: Option<i64>,
 
         /// Due date (YYYY-MM-DD)
@@ -361,7 +377,7 @@ pub enum TaskCommands {
     /// List tasks
     List {
         /// Filter by epic ID
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::epic_id)]
         epic: Option<i64>,
 
         /// Filter by status (defaults to 'open')
@@ -373,7 +389,7 @@ pub enum TaskCommands {
         priority: Option<String>,
 
         /// Filter by assignee ID
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::assignee_id)]
         assignee: Option<i64>,
 
         /// Show only blocked tasks
@@ -403,12 +419,14 @@ pub enum TaskCommands {
     /// Show task details
     Show {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         id: i64,
     },
 
     /// Update a task
     Update {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         id: i64,
 
         /// New title
@@ -428,11 +446,11 @@ pub enum TaskCommands {
         priority: Option<String>,
 
         /// New epic ID (use 0 to remove)
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::epic_id)]
         epic: Option<i64>,
 
         /// New assignee ID (use 0 to remove)
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::assignee_id)]
         assignee: Option<i64>,
 
         /// New due date (YYYY-MM-DD)
@@ -459,6 +477,7 @@ pub enum TaskCommands {
     /// Delete a task
     Delete {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         id: i64,
 
         /// Force deletion without confirmation
@@ -469,9 +488,11 @@ pub enum TaskCommands {
     /// Assign a task to someone
     Assign {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         task_id: i64,
 
         /// Assignee ID (use 0 to unassign)
+        #[arg(value_parser = id_parser::assignee_id)]
         assignee_id: i64,
     },
 
@@ -482,12 +503,14 @@ pub enum TaskCommands {
     /// Unlink external reference
     Unlink {
         /// Reference ID
+        #[arg(value_parser = id_parser::ref_id)]
         ref_id: i64,
     },
 
     /// Close a task
     Close {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         id: i64,
 
         /// Force close even if blocked
@@ -498,12 +521,14 @@ pub enum TaskCommands {
     /// Reopen a task
     Reopen {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         id: i64,
     },
 
     /// Add a note to a task
     Note {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         task_id: i64,
 
         /// Note content
@@ -513,12 +538,14 @@ pub enum TaskCommands {
     /// Show task notes
     Notes {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         task_id: i64,
     },
 
     /// Clone a task
     Clone {
         /// Task ID to clone
+        #[arg(value_parser = id_parser::task_id)]
         id: i64,
 
         /// New title (optional, defaults to "Original (copy)")
@@ -536,6 +563,7 @@ pub enum BatchOpCommands {
     /// Close multiple tasks
     Close {
         /// Task IDs to close
+        #[arg(value_parser = id_parser::task_id)]
         ids: Vec<i64>,
 
         /// Force close even if blocked
@@ -549,15 +577,18 @@ pub enum BatchOpCommands {
         tag: String,
 
         /// Task IDs
+        #[arg(value_parser = id_parser::task_id)]
         ids: Vec<i64>,
     },
 
     /// Move multiple tasks to an epic
     Move {
         /// Epic ID (use 0 for no epic)
+        #[arg(value_parser = id_parser::epic_id)]
         epic_id: i64,
 
         /// Task IDs
+        #[arg(value_parser = id_parser::task_id)]
         ids: Vec<i64>,
     },
 
@@ -574,7 +605,7 @@ pub enum LinkCommands {
     /// Link to GitHub issue
     GithubIssue {
         /// Task ID
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::task_id)]
         task: i64,
 
         /// GitHub reference (owner/repo#number)
@@ -584,7 +615,7 @@ pub enum LinkCommands {
     /// Link to GitHub PR
     GithubPr {
         /// Task ID
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::task_id)]
         task: i64,
 
         /// GitHub reference (owner/repo#number)
@@ -594,7 +625,7 @@ pub enum LinkCommands {
     /// Link to URL
     Url {
         /// Task ID
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::task_id)]
         task: i64,
 
         /// URL
@@ -604,10 +635,11 @@ pub enum LinkCommands {
     /// Mark task as blocking another
     Blocks {
         /// Task ID that blocks
-        #[arg(short, long)]
+        #[arg(short, long, value_parser = id_parser::task_id)]
         task: i64,
 
         /// Task ID being blocked
+        #[arg(value_parser = id_parser::task_id)]
         blocked: i64,
     },
 }
@@ -635,12 +667,14 @@ pub enum AssigneeCommands {
     /// Show assignee details
     Show {
         /// Assignee ID
+        #[arg(value_parser = id_parser::assignee_id)]
         id: i64,
     },
 
     /// Delete an assignee
     Delete {
         /// Assignee ID
+        #[arg(value_parser = id_parser::assignee_id)]
         id: i64,
 
         /// Force deletion without confirmation
@@ -654,15 +688,18 @@ pub enum DepsCommands {
     /// Show dependency tree for a task
     Show {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         task_id: i64,
     },
 
     /// Remove a dependency
     Unlink {
         /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
         task_id: i64,
 
         /// Task ID that was being blocked
+        #[arg(value_parser = id_parser::task_id)]
         blocked_task_id: i64,
     },
 }
@@ -670,7 +707,7 @@ pub enum DepsCommands {
 #[derive(Args)]
 pub struct ListArgs {
     /// Filter by epic ID
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = id_parser::epic_id)]
     pub epic: Option<i64>,
 
     /// Filter by status (defaults to 'open')
@@ -682,7 +719,7 @@ pub struct ListArgs {
     pub priority: Option<String>,
 
     /// Filter by assignee ID
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = id_parser::assignee_id)]
     pub assignee: Option<i64>,
 
     /// Show only blocked tasks
