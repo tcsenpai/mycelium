@@ -2,11 +2,13 @@
 # Mycelium Stop hook — enforce end-of-task follow-up check.
 #
 # No-op unless the current project is a mycelium project (AGENTS.md
-# carries the myc marker). When active follow-ups exist, it feeds them
+# carries the myc marker). When open follow-ups exist, it feeds them
 # back to the agent so they get surfaced to the user instead of relying
 # on the agent remembering the AGENTS.md rule.
 #
-# Installed to ~/.claude/hooks/ and wired into hooks.Stop by install-hook.sh.
+# Installed globally (~/.claude/) by install-hook.sh, and/or project-locally
+# (.claude/) by `myc init` / `myc hooks install`. The self-dedup guard below
+# ensures it runs at most once per stop even when BOTH copies are wired.
 
 # Claude Code passes the hook payload as JSON on stdin.
 input=$(cat)
@@ -16,6 +18,24 @@ input=$(cat)
 if echo "$input" | jq -e '.stop_hook_active == true' >/dev/null 2>&1; then
   exit 0
 fi
+
+# Self-dedup: a global and a project-local copy can both be wired into
+# hooks.Stop. Without this, the check would fire twice per stop. Key a
+# short-lived marker on the stop's session_id (falling back to a hash of
+# transcript_path, then the cwd) so only the FIRST invocation proceeds.
+dedup_key=$(echo "$input" | jq -r '.session_id // .transcript_path // empty' 2>/dev/null)
+[ -n "$dedup_key" ] || dedup_key="$PWD"
+dedup_hash=$(printf '%s' "$dedup_key" | cksum | cut -d' ' -f1)
+marker="${TMPDIR:-/tmp}/.myc-fu-stop-${dedup_hash}"
+if [ -f "$marker" ]; then
+  # Fresh marker (<10s) means a sibling copy already handled this stop.
+  now=$(date +%s)
+  mtime=$(stat -f %m "$marker" 2>/dev/null || stat -c %Y "$marker" 2>/dev/null || echo 0)
+  if [ $((now - mtime)) -lt 10 ]; then
+    exit 0
+  fi
+fi
+touch "$marker" 2>/dev/null || true
 
 # Gate 1: mycelium project? Marker is version-independent (myc:agents-start v=N).
 grep -q "myc:agents-start" AGENTS.md 2>/dev/null || exit 0

@@ -11,10 +11,19 @@ pub use mycelium_core::{db, error, models};
 
 use cli::{
     AssigneeCommands, BatchOpCommands, Cli, Commands, DepsCommands, EpicCommands, ExportCommands,
-    FollowupCommands, LinearCommands, LinkCommands, TaskCommands,
+    FollowupCommands, HooksCommands, LinearCommands, LinkCommands, TaskCommands,
 };
 
 pub use commands::{ERROR_PREFIX, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
+
+/// Map the `--global` flag to a hook install scope.
+fn scope(global: bool) -> commands::hooks::Scope {
+    if global {
+        commands::hooks::Scope::Global
+    } else {
+        commands::hooks::Scope::Local
+    }
+}
 
 /// Print an error and exit. Lives in the CLI binary (not core) because it does
 /// terminal I/O and process exit.
@@ -27,7 +36,7 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Init => commands::init::execute(false),
+        Commands::Init { no_hooks } => commands::init::execute(false, no_hooks),
 
         Commands::PrimeAgents { force, path } => {
             commands::init::execute_prime_agents(force, path.as_deref())
@@ -314,6 +323,12 @@ fn main() {
                 commands::followup::promote(id, epic, &priority, cli.quiet)
             }
             FollowupCommands::Count => commands::followup::count(&cli.format, cli.quiet),
+        },
+
+        Commands::Hooks(cmd) => match cmd {
+            HooksCommands::Install { global } => commands::hooks::install(scope(global)),
+            HooksCommands::Uninstall { global } => commands::hooks::uninstall(scope(global)),
+            HooksCommands::Status => commands::hooks::status(),
         },
     };
 

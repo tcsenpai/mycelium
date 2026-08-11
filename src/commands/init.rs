@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 5;
+const AGENTS_MD_VERSION: u32 = 6;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -105,6 +105,23 @@ The `.mycelium/` directory contains the SQLite database and should be committed 
 git add .mycelium/
 git commit -m "Add mycelium project tracking"
 ```
+
+### Follow-up Stop hook (Claude Code)
+
+`myc init` installs a project-local Claude Code Stop hook into `.claude/`
+(script + `settings.json` wiring) that enforces the end-of-task follow-up
+check automatically. Commit `.claude/` so the whole team gets it.
+
+```bash
+myc init --no-hooks          # skip the hook install
+myc hooks install            # (re)install into the project's .claude/
+myc hooks install --global   # install into ~/.claude instead
+myc hooks uninstall          # remove (add --global for ~/.claude)
+myc hooks status             # show where it's installed
+```
+
+The hook self-dedups, so a global and a local copy can coexist without
+firing the check twice.
 
 ### Follow-ups (`myc followup`, alias `myc fu`)
 
@@ -262,7 +279,7 @@ fn ensure_project_initialized(mycelium_dir: &Path) -> Result<bool> {
     Ok(true)
 }
 
-pub fn execute(force_init: bool) -> Result<()> {
+pub fn execute(force_init: bool, no_hooks: bool) -> Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mycelium_dir = cwd.join(".mycelium");
     let agents_md_path = cwd.join("AGENTS.md");
@@ -275,6 +292,9 @@ pub fn execute(force_init: bool) -> Result<()> {
             "{} Mycelium project already initialized",
             INFO_PREFIX.blue()
         );
+        // Still (re)install the hook — idempotent, and covers repos initialized
+        // before the hook existed.
+        install_hook_if_wanted(no_hooks);
         return Ok(());
     }
 
@@ -307,7 +327,28 @@ pub fn execute(force_init: bool) -> Result<()> {
         }
     }
 
+    install_hook_if_wanted(no_hooks);
+
     Ok(())
+}
+
+/// Install the project-local follow-up hook unless the user opted out. Non-fatal:
+/// a failure here warns but does not fail `init`.
+fn install_hook_if_wanted(no_hooks: bool) {
+    if no_hooks {
+        println!(
+            "{} Skipped follow-up hook install (--no-hooks)",
+            INFO_PREFIX.blue()
+        );
+        return;
+    }
+    if let Err(e) = crate::commands::hooks::install(crate::commands::hooks::Scope::Local) {
+        println!(
+            "{} Could not install follow-up hook: {} (run `myc hooks install` later)",
+            INFO_PREFIX.blue(),
+            e
+        );
+    }
 }
 
 pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {

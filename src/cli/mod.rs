@@ -22,7 +22,11 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Initialize a new mycelium project
-    Init,
+    Init {
+        /// Skip installing the follow-up Stop hook into .claude/
+        #[arg(long)]
+        no_hooks: bool,
+    },
 
     /// Generate or update AGENTS.md with mycelium instructions
     PrimeAgents {
@@ -75,6 +79,30 @@ pub enum Commands {
     /// Manage follow-ups (lightweight "oh-by-the-way" items)
     #[command(subcommand, alias = "fu")]
     Followup(FollowupCommands),
+
+    /// Manage the Claude Code follow-up Stop hook
+    #[command(subcommand)]
+    Hooks(HooksCommands),
+}
+
+#[derive(Subcommand)]
+pub enum HooksCommands {
+    /// Install the follow-up hook (project-local by default)
+    Install {
+        /// Install into ~/.claude instead of the project's .claude/
+        #[arg(long)]
+        global: bool,
+    },
+
+    /// Remove the follow-up hook
+    Uninstall {
+        /// Remove from ~/.claude instead of the project's .claude/
+        #[arg(long)]
+        global: bool,
+    },
+
+    /// Show where the follow-up hook is installed
+    Status,
 }
 
 #[derive(Subcommand)]

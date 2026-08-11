@@ -21,7 +21,7 @@ Hindsight bank named in `.bank` (do not edit by hand).
   `~/.claude/hindsight-memory.enabled`.
 <!-- hindsight-memory:end -->
 
-<!-- myc:agents-start v=5 -->
+<!-- myc:agents-start v=6 -->
 ## Project Management with Mycelium
 
 This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
@@ -115,6 +115,23 @@ The `.mycelium/` directory contains the SQLite database and should be committed 
 git add .mycelium/
 git commit -m "Add mycelium project tracking"
 ```
+
+### Follow-up Stop hook (Claude Code)
+
+`myc init` installs a project-local Claude Code Stop hook into `.claude/`
+(script + `settings.json` wiring) that enforces the end-of-task follow-up
+check automatically. Commit `.claude/` so the whole team gets it.
+
+```bash
+myc init --no-hooks          # skip the hook install
+myc hooks install            # (re)install into the project's .claude/
+myc hooks install --global   # install into ~/.claude instead
+myc hooks uninstall          # remove (add --global for ~/.claude)
+myc hooks status             # show where it's installed
+```
+
+The hook self-dedups, so a global and a local copy can coexist without
+firing the check twice.
 
 ### Follow-ups (`myc followup`, alias `myc fu`)
 

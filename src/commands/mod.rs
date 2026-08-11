@@ -9,6 +9,7 @@ pub mod doctor;
 pub mod epic;
 pub mod export;
 pub mod followup;
+pub mod hooks;
 pub mod init;
 pub mod linear;
 pub mod list;
