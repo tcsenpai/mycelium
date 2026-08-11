@@ -26,21 +26,23 @@ command -v myc >/dev/null 2>&1 || exit 0
 # jq is required to parse myc JSON; degrade silently if missing.
 command -v jq >/dev/null 2>&1 || exit 0
 
-# Count active follow-ups (open + in_progress).
+# Count OPEN follow-ups only. Per the project rule, `in_progress` items are
+# already being worked and don't need an end-of-task decision — so they must
+# NOT trigger the block (matches the `myc task close` close-hint behavior).
 counts=$(myc followup count --format json 2>/dev/null) || exit 0
-active=$(echo "$counts" | jq '(.open // 0) + (.in_progress // 0)')
-[ "${active:-0}" -gt 0 ] 2>/dev/null || exit 0
+open=$(echo "$counts" | jq '(.open // 0)')
+[ "${open:-0}" -gt 0 ] 2>/dev/null || exit 0
 
-# Build a bullet list of the active items for the reminder.
-items=$(myc followup list -o --format json 2>/dev/null \
+# Build a bullet list of the OPEN items for the reminder.
+items=$(myc followup list --status open --format json 2>/dev/null \
   | jq -r '.[] | "  - [\(.id)] \(.title // "untitled"): \(.body)"')
 
 # Emit Stop-hook JSON. `block` + `reason` is how a Stop hook feeds text
 # back to the model; the guard above ensures it fires at most once.
-jq -n --arg active "$active" --arg items "$items" '{
+jq -n --arg open "$open" --arg items "$items" '{
   decision: "block",
-  reason: ("MYCELIUM FOLLOW-UP CHECK: " + $active + " active follow-up(s) exist. " +
+  reason: ("MYCELIUM FOLLOW-UP CHECK: " + $open + " open follow-up(s) exist. " +
     "Per project rule, surface them to the user before wrapping — never process " +
     "silently. Ask whether to handle them now or leave for later.\n\n" +
-    "Active follow-ups:\n" + $items)
+    "Open follow-ups:\n" + $items)
 }'
