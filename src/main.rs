@@ -330,6 +330,8 @@ fn main() {
             HooksCommands::Uninstall { global } => commands::hooks::uninstall(scope(global)),
             HooksCommands::Status => commands::hooks::status(),
         },
+
+        Commands::Update => commands::update::execute(),
     };
 
     if let Err(e) = result {

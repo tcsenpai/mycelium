@@ -83,6 +83,9 @@ pub enum Commands {
     /// Manage the Claude Code follow-up Stop hook
     #[command(subcommand)]
     Hooks(HooksCommands),
+
+    /// Update the myc binary (via cargo) and resync AGENTS.md + the hook
+    Update,
 }
 
 #[derive(Subcommand)]

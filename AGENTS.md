@@ -21,7 +21,7 @@ Hindsight bank named in `.bank` (do not edit by hand).
   `~/.claude/hindsight-memory.enabled`.
 <!-- hindsight-memory:end -->
 
-<!-- myc:agents-start v=6 -->
+<!-- myc:agents-start v=7 -->
 ## Project Management with Mycelium
 
 This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
@@ -132,6 +132,17 @@ myc hooks status             # show where it's installed
 
 The hook self-dedups, so a global and a local copy can coexist without
 firing the check twice.
+
+### Updating
+
+```bash
+myc update   # cargo install --force, then resync AGENTS.md + hook to the new version
+```
+
+`myc update` updates the binary via cargo, then re-runs `prime-agents --force`
+and `hooks install` so this project's AGENTS.md and hook match the new version.
+If cargo isn't available it skips the binary step and just resyncs the
+artifacts (update the binary by hand, then rerun).
 
 ### Follow-ups (`myc followup`, alias `myc fu`)
 

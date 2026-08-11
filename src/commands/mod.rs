@@ -15,6 +15,7 @@ pub mod linear;
 pub mod list;
 pub mod summary;
 pub mod task;
+pub mod update;
 
 pub const ERROR_PREFIX: &str = "❌";
 pub const SUCCESS_PREFIX: &str = "✅";

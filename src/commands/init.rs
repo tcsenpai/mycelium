@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 6;
+const AGENTS_MD_VERSION: u32 = 7;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -122,6 +122,17 @@ myc hooks status             # show where it's installed
 
 The hook self-dedups, so a global and a local copy can coexist without
 firing the check twice.
+
+### Updating
+
+```bash
+myc update   # cargo install --force, then resync AGENTS.md + hook to the new version
+```
+
+`myc update` updates the binary via cargo, then re-runs `prime-agents --force`
+and `hooks install` so this project's AGENTS.md and hook match the new version.
+If cargo isn't available it skips the binary step and just resyncs the
+artifacts (update the binary by hand, then rerun).
 
 ### Follow-ups (`myc followup`, alias `myc fu`)
 
