@@ -75,11 +75,11 @@ using the lightweight **follow-ups** scratchpad:
 myc followup add "TODO: rotate the JWT secret, it's hardcoded in config.rs"
 ```
 
-**3. Wrap-up: nothing gets silently dropped.** When the agent finishes, an
-optional [Claude Code](https://docs.claude.com/en/docs/claude-code) **Stop
-hook** (shipped in `hooks/`) fires and checks for open follow-ups. If any
-exist, it feeds them back to the agent, which surfaces them to you instead of
-ending the turn as if everything were done:
+**3. Wrap-up: nothing gets silently dropped.** When the agent finishes, a
+[Claude Code](https://docs.claude.com/en/docs/claude-code) **Stop hook**
+(installed automatically by `myc init`) fires and checks for open follow-ups.
+If any exist, it feeds them back to the agent, which surfaces them to you
+instead of ending the turn as if everything were done:
 
 > Before we wrap, 1 open follow-up: "rotate the JWT secret, hardcoded in
 > config.rs". Want me to handle it now, or leave it for later?
@@ -92,7 +92,7 @@ session (cleared context, or a teammate on another machine who pulled the
 branch) starts by reading the plan back, not by asking you what happened:
 
 ```bash
-myc list                 # the Auth epic, its tasks, "Session middleware [blocked by #2]"
+myc list                 # the Auth epic, its tasks, "Session middleware [blocked by T2]"
 myc followup list -o     # the JWT-secret note is still waiting
 ```
 
@@ -105,6 +105,7 @@ It resumes exactly where the last session left off. The plan lived in
 - **State Persistence**: Plan survives context resets; reconstructable from `myc list`
 - **Git-Trackable**: SQLite storage designed for version control and branch sync
 - **Dependency Management**: Task blocking with cycle detection
+- **Category-Prefixed IDs**: Displays `E3`/`T3`/`F3` so epic/task/follow-up IDs never get confused; input still accepts bare numbers
 - **Follow-ups**: Lightweight scratch table for non-blocking items captured mid-work
 - **Smart List View**: Tree visualization for dependencies, epic grouping for simple lists
 - **Assignees**: Local assignees with GitHub username linking
@@ -125,6 +126,17 @@ cargo install mycelium-manager
 ```
 
 Installs the `myc` binary to `~/.cargo/bin/`. Requires Rust 1.75+.
+
+#### Updating
+
+```bash
+myc update
+```
+
+Updates the binary via `cargo install --force`, then resyncs this project's
+`AGENTS.md` and follow-up hook to the new version. If `cargo` isn't available
+it skips the binary step and just resyncs the artifacts (update the binary by
+hand, then rerun).
 
 ### CLI (`myc`) from source
 
@@ -242,10 +254,18 @@ myc summary
 ### Project
 
 ```bash
-myc init                    # Initialize mycelium in current directory
+myc init                    # Initialize mycelium (also installs the follow-up hook)
+myc init --no-hooks         # ...without installing the hook
+myc update                  # Update the binary + resync AGENTS.md and the hook
 myc summary                 # Show project overview
 myc doctor                  # Check system health and configuration
 ```
+
+> **IDs are category-prefixed.** Commands display `E3` (epic), `T3` (task),
+> `F3` (follow-up). You can pass either the bare number (`myc task show 3`) or
+> the prefixed form (`myc task show T3`, case-insensitive); a wrong-category
+> prefix (`myc task show E3`) is rejected with a hint. JSON/CSV keep raw
+> integer IDs.
 
 ### Epics
 
@@ -372,6 +392,15 @@ active follow-ups exist. Agents using mycelium MUST run `myc followup
 list` at the end of every work unit and surface open items to the user
 before wrapping (see AGENTS.md).
 
+### Hooks
+
+```bash
+myc hooks install            # install the follow-up Stop hook into .claude/ (local)
+myc hooks install --global   # ...into ~/.claude/ instead
+myc hooks uninstall          # remove it (add --global for ~/.claude)
+myc hooks status             # show where it's installed
+```
+
 ### Reporting & Export
 
 ```bash
@@ -460,21 +489,31 @@ myc task list --blocked
 myc export json
 ```
 
-### Claude Code follow-up hook (optional)
+### Claude Code follow-up hook
 
-`hooks/` ships a [Claude Code](https://docs.claude.com/en/docs/claude-code)
-Stop hook that enforces the end-of-task follow-up check, so it no longer
-relies on the agent remembering the AGENTS.md rule.
+A [Claude Code](https://docs.claude.com/en/docs/claude-code) Stop hook enforces
+the end-of-task follow-up check, so it no longer relies on the agent remembering
+the AGENTS.md rule. The hook script is embedded in the `myc` binary, so it ships
+with `cargo install` — no extra files to fetch.
+
+`myc init` installs it automatically into the project's `.claude/` (commit that
+directory so the whole team gets the check). Manage it explicitly with:
 
 ```bash
-./hooks/install-hook.sh              # install into ~/.claude/
-./hooks/install-hook.sh --uninstall  # remove it
+myc hooks install            # project-local .claude/ (default)
+myc hooks install --global   # ~/.claude/ instead
+myc hooks uninstall          # remove (add --global for ~/.claude)
+myc hooks status             # show where it's installed
+myc init --no-hooks          # initialize without installing the hook
 ```
 
-The hook self-gates: it stays silent outside mycelium projects (detected
-via the `myc:agents-start` marker in `AGENTS.md`) and only fires when
-active follow-ups exist, feeding them back to the agent to surface to
-you. Requires `jq`.
+The hook self-gates: it stays silent outside mycelium projects (detected via the
+`myc:agents-start` marker in `AGENTS.md`) and only fires when **open** follow-ups
+exist. It also self-dedups on the session, so a global and a project-local copy
+can coexist without firing the check twice. Requires `jq`.
+
+> Prefer a shell installer for a global-only setup? `hooks/install-hook.sh`
+> (and `--uninstall`) still installs into `~/.claude/` without the binary.
 
 ## Configuration
 
