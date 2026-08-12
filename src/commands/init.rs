@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 7;
+const AGENTS_MD_VERSION: u32 = 8;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -164,6 +164,8 @@ myc followup edit <id> --body "new body" [--title -|"new title"]
 myc followup append <id> "more context"     # timestamped, preserves existing
 myc followup rm <id> [--force]
 myc followup promote <id> [--epic N] [--priority high]  # convert to task
+myc followup snooze [--turns N]             # silence the Stop hook for N stops (default 5)
+myc followup snooze --turns 0               # clear an active snooze
 ```
 
 **Agent rule — end-of-task follow-up check** (MANDATORY)
@@ -184,6 +186,12 @@ MUST:
 `myc task close` itself also prints a one-line reminder (only for open
 follow-ups older than ~60s; fresh or in_progress ones stay silent), but
 the agent should still proactively check.
+
+The Stop hook re-runs this check on **every** stop while `open > 0`. Once
+you've surfaced the follow-ups to the user (step 2) and they've chosen to
+leave them for later, run `myc followup snooze` to silence the hook for the
+next few stops instead of being re-prompted each turn. Snooze is
+project-scoped and consumes one stop at a time.
 
 Use `myc followup add` during work to capture anything you notice but
 shouldn't act on right now.
@@ -277,6 +285,8 @@ fn ensure_project_initialized(mycelium_dir: &Path) -> Result<bool> {
 *.db-shm
 # Temporary files
 *.tmp
+# Follow-up Stop-hook snooze counter (per-session, project-local)
+.followup-snooze
 "#;
         fs::write(&gitignore_path, gitignore_content)?;
     }

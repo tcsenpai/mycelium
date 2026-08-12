@@ -323,6 +323,7 @@ fn main() {
                 commands::followup::promote(id, epic, &priority, cli.quiet)
             }
             FollowupCommands::Count => commands::followup::count(&cli.format, cli.quiet),
+            FollowupCommands::Snooze { turns } => commands::followup::snooze(turns, cli.quiet),
         },
 
         Commands::Hooks(cmd) => match cmd {

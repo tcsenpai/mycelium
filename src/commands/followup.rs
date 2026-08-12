@@ -358,6 +358,40 @@ pub fn count(format: &OutputFormat, quiet: bool) -> Result<()> {
     Ok(())
 }
 
+/// Silence the follow-up Stop-hook for the next `turns` stops. Writes a plain
+/// counter to `.mycelium/.followup-snooze` — project-scoped by living next to
+/// the DB, and read+decremented by the Stop hook. `turns == 0` clears it.
+pub fn snooze(turns: u32, quiet: bool) -> Result<()> {
+    // Reuse the DB dir so the snooze file is co-located with (and scoped to)
+    // this project; error out the same way commands do if not initialized.
+    let dir = crate::commands::get_db_path()
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .ok_or(MyceliumError::NotInitialized)?;
+    if !dir.exists() {
+        return Err(MyceliumError::NotInitialized);
+    }
+    let marker = dir.join(".followup-snooze");
+
+    if turns == 0 {
+        let _ = std::fs::remove_file(&marker);
+        if !quiet {
+            println!("{} Follow-up snooze cleared", SUCCESS_PREFIX.green());
+        }
+        return Ok(());
+    }
+
+    std::fs::write(&marker, turns.to_string())?;
+    if !quiet {
+        println!(
+            "{} Follow-up check snoozed for the next {} stop(s)",
+            SUCCESS_PREFIX.green(),
+            turns
+        );
+    }
+    Ok(())
+}
+
 /// Best-effort hint printed at end of task close. Never errors.
 pub fn print_close_hint() {
     let Ok(db) = ensure_initialized() else { return };

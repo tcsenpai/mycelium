@@ -238,6 +238,15 @@ pub enum FollowupCommands {
 
     /// Show counts (great for end-of-task agent checks)
     Count,
+
+    /// Silence the end-of-task follow-up Stop-hook for the next N stops
+    /// (project-scoped). Use after you've already surfaced follow-ups so the
+    /// hook stops re-nagging every turn.
+    Snooze {
+        /// Number of stops to stay silent (0 clears an active snooze)
+        #[arg(short, long, default_value = "5")]
+        turns: u32,
+    },
 }
 
 #[derive(Subcommand)]
