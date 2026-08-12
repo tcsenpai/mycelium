@@ -119,13 +119,32 @@ It resumes exactly where the last session left off. The plan lived in
 
 ## Installation
 
-### CLI (`myc`) via crates.io (recommended)
+Every tagged release ships prebuilt `myc` binaries for macOS (arm64/x86_64),
+Linux (x86_64), and Windows (x86_64), so most methods below need **no
+compilation**. `cargo install` is the only one that always builds from source.
+
+### CLI (`myc`) via Homebrew (macOS/Linux, no compile)
+
+```bash
+brew install tcsenpai/tap/myc
+```
+
+### CLI (`myc`) via cargo-binstall (no compile)
+
+Downloads the prebuilt release binary instead of building it:
+
+```bash
+cargo binstall mycelium-manager
+```
+
+### CLI (`myc`) via crates.io (builds from source)
 
 ```bash
 cargo install mycelium-manager
 ```
 
-Installs the `myc` binary to `~/.cargo/bin/`. Requires Rust 1.75+.
+Installs the `myc` binary to `~/.cargo/bin/`. Requires Rust 1.75+. This is the
+only method that compiles from source — use `cargo binstall` above to skip it.
 
 #### Updating
 
@@ -187,13 +206,20 @@ bun run tauri:dev
 git clone https://github.com/tcsenpai/mycelium && cd mycelium && ./install.sh
 ```
 
-The install script detects your platform, builds, and installs both `myc` (CLI) and `MycUI` (GUI). On macOS, MycUI is installed as `/Applications/MycUI.app`. On Linux, both binaries go to `/usr/local/bin/`.
+The install script detects your platform and installs both `myc` (CLI) and
+`MycUI` (GUI). For the CLI it **downloads the prebuilt release binary** and only
+falls back to a source build if no matching asset exists. MycUI is always built
+from source (Tauri). On macOS, MycUI is installed as `/Applications/MycUI.app`;
+on Linux, both binaries go to `/usr/local/bin/`.
 
 ```bash
-./install.sh --cli       # Install only the CLI
-./install.sh --gui       # Install only MycUI
-./install.sh --all       # Install both (default)
-INSTALL_DIR=~/.local/bin ./install.sh --cli  # Custom install path (CLI)
+./install.sh --cli            # Install the CLI (prebuilt, falls back to source)
+./install.sh --gui            # Install only MycUI (source build)
+./install.sh --all            # Install both (default)
+./install.sh --from-release   # Force the prebuilt CLI binary (no cargo needed)
+./install.sh --build          # Force a source build of the CLI
+INSTALL_DIR=~/.local/bin ./install.sh --cli   # Custom install path (CLI)
+MYC_VERSION=0.4.2 ./install.sh --from-release  # Pin a specific prebuilt version
 ```
 
 ## Versioning
@@ -385,12 +411,19 @@ myc followup append <id> "more context"         # timestamped, additive
 myc followup rm <id> [--force]
 myc followup promote <id> [--epic N] [--priority high]   # convert to task
 myc followup count                              # JSON: {open, in_progress, done, wontfix}
+myc followup snooze [--turns N]                 # silence the Stop hook for N stops (default 5)
+myc followup snooze --turns 0                   # clear an active snooze
 ```
 
 After `myc task close`, mycelium prints a one-line reminder if any
 active follow-ups exist. Agents using mycelium MUST run `myc followup
 list` at the end of every work unit and surface open items to the user
 before wrapping (see AGENTS.md).
+
+The follow-up Stop hook re-checks on every stop while open items exist. Once
+you've surfaced them and the user decides to leave them for later,
+`myc followup snooze` silences the hook for the next few stops (project-scoped,
+one stop consumed per snooze) instead of re-prompting each turn.
 
 ### Hooks
 
