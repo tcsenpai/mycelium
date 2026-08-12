@@ -190,10 +190,12 @@ jobs:
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then
+          git add Formula/myc.rb
+          # Check AFTER staging: `git diff --quiet` alone ignores a brand-new
+          # untracked formula, so the first release would silently no-op.
+          if git diff --cached --quiet; then
             echo "Formula unchanged; nothing to push."
             exit 0
           fi
-          git add Formula/myc.rb
           git commit -m "myc ${TAG#v}"
           git push
