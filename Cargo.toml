@@ -3,7 +3,7 @@ members = ["mycelium-core"]
 
 [package]
 name = "mycelium-manager"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 authors = ["Mycelium Contributors"]
 description = "A robust, production-grade task/plan manager CLI (binary: myc)"

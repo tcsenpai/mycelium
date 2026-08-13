@@ -44,8 +44,7 @@ pub fn rid(id: i64) -> String {
 }
 
 pub fn get_db_path() -> std::path::PathBuf {
-    let cwd =
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     // Walk up like git: the first ancestor holding an initialized `.mycelium/`
     // wins, so `myc` (and the Stop hook) resolve the SAME project DB from any
     // subdirectory. Without this, running a command from a subdir silently

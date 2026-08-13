@@ -23,7 +23,11 @@ const MYC_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Global registry path: `~/.mycelium/refresh-state.json`. None if HOME unset.
 fn registry_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".mycelium").join("refresh-state.json"))
+    std::env::var_os("HOME").map(|h| {
+        PathBuf::from(h)
+            .join(".mycelium")
+            .join("refresh-state.json")
+    })
 }
 
 /// Absolute path of the current project root (parent of the resolved
