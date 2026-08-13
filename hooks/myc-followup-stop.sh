@@ -41,11 +41,22 @@ touch "$marker" 2>/dev/null || true
 grep -q "myc:agents-start" AGENTS.md 2>/dev/null || exit 0
 
 # Gate 1.5: snooze active? `myc followup snooze` writes a decrementing counter
-# to .mycelium/.followup-snooze (project-scoped). While it's >0, consume one
-# stop and stay silent — this is how the agent tells the hook "I already
-# surfaced these, stop re-nagging every turn".
-snooze_file=".mycelium/.followup-snooze"
-if [ -f "$snooze_file" ]; then
+# to <project>/.mycelium/.followup-snooze. `myc` resolves the project by walking
+# up from its cwd to the first ancestor holding .mycelium/mycelium.db, so the
+# hook MUST do the same — otherwise a snooze written from a subdir lands in a
+# .mycelium/ the hook never reads, and the check re-nags every stop despite the
+# snooze (the "snooze doesn't stick" bug). Walk up here to match get_db_path().
+snooze_file=""
+d="$PWD"
+while [ -n "$d" ]; do
+  if [ -f "$d/.mycelium/mycelium.db" ]; then
+    snooze_file="$d/.mycelium/.followup-snooze"
+    break
+  fi
+  [ "$d" = "/" ] && break
+  d=$(dirname "$d")
+done
+if [ -n "$snooze_file" ] && [ -f "$snooze_file" ]; then
   n=$(cat "$snooze_file" 2>/dev/null | tr -dc '0-9')
   if [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null; then
     left=$((n - 1))

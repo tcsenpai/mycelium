@@ -184,9 +184,7 @@ fn display_results(results: &[CheckResult]) {
 }
 
 fn check_project_initialized() -> Result<CheckResult> {
-    let mycelium_dir = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium");
+    let mycelium_dir = crate::commands::get_mycelium_dir();
 
     if !mycelium_dir.exists() {
         return Ok(CheckResult::error(
@@ -203,10 +201,7 @@ fn check_project_initialized() -> Result<CheckResult> {
 }
 
 fn check_database_accessible() -> Result<CheckResult> {
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join("mycelium.db");
+    let db_path = crate::commands::get_db_path();
 
     if !db_path.exists() {
         // Not auto-fixable: silently creating an empty database here would
@@ -231,10 +226,7 @@ fn check_database_accessible() -> Result<CheckResult> {
 }
 
 fn check_database_integrity() -> Result<CheckResult> {
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join("mycelium.db");
+    let db_path = crate::commands::get_db_path();
 
     if !db_path.exists() {
         return Ok(CheckResult::warning(
@@ -299,10 +291,7 @@ fn check_database_integrity() -> Result<CheckResult> {
 }
 
 fn check_orphaned_tasks() -> Result<CheckResult> {
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join("mycelium.db");
+    let db_path = crate::commands::get_db_path();
 
     if !db_path.exists() {
         return Ok(CheckResult::warning(
@@ -345,10 +334,7 @@ fn check_orphaned_tasks() -> Result<CheckResult> {
 }
 
 fn check_circular_dependencies() -> Result<CheckResult> {
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join("mycelium.db");
+    let db_path = crate::commands::get_db_path();
 
     if !db_path.exists() {
         return Ok(CheckResult::warning(
@@ -393,10 +379,7 @@ fn check_circular_dependencies() -> Result<CheckResult> {
 }
 
 fn check_gitignore() -> Result<CheckResult> {
-    let gitignore_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join(".gitignore");
+    let gitignore_path = crate::commands::get_mycelium_dir().join(".gitignore");
 
     if !gitignore_path.exists() {
         return Ok(CheckResult::error(
@@ -427,9 +410,7 @@ fn check_gitignore() -> Result<CheckResult> {
 }
 
 fn check_wal_files() -> Result<CheckResult> {
-    let mycelium_dir = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium");
+    let mycelium_dir = crate::commands::get_mycelium_dir();
 
     let wal_exists = mycelium_dir.join("mycelium.db-wal").exists();
     let shm_exists = mycelium_dir.join("mycelium.db-shm").exists();
@@ -445,10 +426,7 @@ fn check_wal_files() -> Result<CheckResult> {
 }
 
 fn check_schema_version() -> Result<CheckResult> {
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join("mycelium.db");
+    let db_path = crate::commands::get_db_path();
 
     if !db_path.exists() {
         return Ok(CheckResult::warning(
@@ -499,10 +477,7 @@ fn try_fix(check_name: &str) -> Result<bool> {
 }
 
 fn fix_database() -> Result<bool> {
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join("mycelium.db");
+    let db_path = crate::commands::get_db_path();
 
     // Never silently create a database here: `Database::open` creates the
     // file if it's missing, which would mask data loss (wrong cwd, deleted
@@ -518,10 +493,7 @@ fn fix_database() -> Result<bool> {
 }
 
 fn fix_gitignore() -> Result<bool> {
-    let gitignore_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join(".gitignore");
+    let gitignore_path = crate::commands::get_mycelium_dir().join(".gitignore");
 
     let content = r#"# Mycelium database
 # The database file is git-trackable but WAL files are not
@@ -536,10 +508,7 @@ fn fix_gitignore() -> Result<bool> {
 }
 
 fn fix_schema() -> Result<bool> {
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join("mycelium.db");
+    let db_path = crate::commands::get_db_path();
 
     if !db_path.exists() {
         return Ok(false);

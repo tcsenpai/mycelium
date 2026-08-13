@@ -43,10 +43,30 @@ pub fn rid(id: i64) -> String {
 }
 
 pub fn get_db_path() -> std::path::PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".mycelium")
-        .join("mycelium.db")
+    let cwd =
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    // Walk up like git: the first ancestor holding an initialized `.mycelium/`
+    // wins, so `myc` (and the Stop hook) resolve the SAME project DB from any
+    // subdirectory. Without this, running a command from a subdir silently
+    // targeted a different `.mycelium/` than the hook — the snooze-not-sticking
+    // bug (snooze written to one DB dir, hook read another). Falls back to
+    // cwd/.mycelium so `myc init` in a fresh dir still creates it there.
+    for dir in cwd.ancestors() {
+        let candidate = dir.join(".mycelium").join("mycelium.db");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    cwd.join(".mycelium").join("mycelium.db")
+}
+
+/// The resolved `.mycelium/` dir for the current project (parent of the DB).
+/// Shares get_db_path's upward walk so every command agrees from any subdir.
+pub fn get_mycelium_dir() -> std::path::PathBuf {
+    get_db_path()
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from(".mycelium"))
 }
 
 pub fn ensure_initialized() -> Result<Database> {
