@@ -35,6 +35,10 @@ fn handle_error(err: error::MyceliumError) -> ! {
 fn main() {
     let cli = Cli::parse();
 
+    // First run in this repo after a myc upgrade: reconcile AGENTS.md and the
+    // Stop hook. Self-gating and best-effort — never blocks the real command.
+    commands::autorefresh::maybe_refresh(&cli.command);
+
     let result = match cli.command {
         Commands::Init { no_hooks } => commands::init::execute(false, no_hooks),
 

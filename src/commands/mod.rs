@@ -4,6 +4,7 @@ use crate::error::Result;
 use colored::Colorize;
 
 pub mod assignee;
+pub mod autorefresh;
 pub mod deps;
 pub mod doctor;
 pub mod epic;

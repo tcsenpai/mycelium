@@ -416,6 +416,17 @@ pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+/// True when `AGENTS.md` in cwd has a mycelium marker block whose embedded
+/// version differs from this binary's `AGENTS_MD_VERSION`. False when the file
+/// is missing, has no marker, or is already current — the auto-refresh only
+/// acts on a present-but-outdated block (never creates AGENTS.md unprompted).
+pub fn is_agents_block_stale() -> bool {
+    let Ok(content) = fs::read_to_string("AGENTS.md") else {
+        return false;
+    };
+    matches!(find_marker_block(&content), Some((_, _, ver)) if ver != Some(AGENTS_MD_VERSION))
+}
+
 /// Build the wrapped marker block with embedded version.
 fn marker_block() -> String {
     format!(

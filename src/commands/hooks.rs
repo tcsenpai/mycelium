@@ -56,6 +56,31 @@ impl Scope {
     }
 }
 
+/// The on-disk script path for a scope, if HOME resolves. Used by the
+/// post-update auto-refresh to compare installed content against HOOK_SCRIPT.
+pub fn script_path(scope: Scope) -> Result<PathBuf> {
+    Ok(scope.claude_dir()?.join("hooks").join(HOOK_NAME))
+}
+
+/// True when this scope has the hook script installed on disk.
+pub fn is_installed(scope: Scope) -> bool {
+    script_path(scope).map(|p| p.exists()).unwrap_or(false)
+}
+
+/// True when the installed script differs from the version embedded in this
+/// binary (byte comparison — the script is entirely myc-owned, no user edits).
+pub fn is_stale(scope: Scope) -> bool {
+    let Ok(path) = script_path(scope) else {
+        return false;
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(disk) => disk != HOOK_SCRIPT,
+        Err(_) => false,
+    }
+}
+
+pub const ALL_SCOPES: [Scope; 2] = [Scope::Local, Scope::Global];
+
 pub fn install(scope: Scope) -> Result<()> {
     let claude_dir = scope.claude_dir()?;
     let hooks_dir = claude_dir.join("hooks");
