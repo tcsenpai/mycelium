@@ -86,6 +86,9 @@ pub enum Commands {
 
     /// Update the myc binary (via cargo) and resync AGENTS.md + the hook
     Update,
+
+    /// Show myc and mycelium-core versions (supports --format json)
+    Version,
 }
 
 #[derive(Subcommand)]

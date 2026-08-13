@@ -84,6 +84,7 @@ fn is_exempt(cmd: &Commands) -> bool {
             | Commands::PrimeAgents { .. }
             | Commands::Hooks(_)
             | Commands::Doctor { .. }
+            | Commands::Version
     )
 }
 

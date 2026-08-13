@@ -337,6 +337,8 @@ fn main() {
         },
 
         Commands::Update => commands::update::execute(),
+
+        Commands::Version => commands::version::execute(&cli.format, cli.quiet),
     };
 
     if let Err(e) = result {
