@@ -10,6 +10,7 @@ export interface Task {
   priority: Priority;
   epic_id?: number;
   epic_title?: string;
+  parent_id?: number | null;
   assignee_id?: number;
   assignee_name?: string;
   due_date?: string;
@@ -18,6 +19,15 @@ export interface Task {
   updated_at: string;
   blocked_by: number[];
   blocks: number[];
+}
+
+export type TaskRefType = 'relates' | 'duplicate';
+
+export interface TaskRefView {
+  id: number;
+  ref_type: TaskRefType;
+  other_id: number;
+  title: string;
 }
 
 export interface Epic {

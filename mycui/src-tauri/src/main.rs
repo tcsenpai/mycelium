@@ -832,6 +832,66 @@ async fn get_dependencies(
 }
 
 #[tauri::command]
+async fn set_task_parent(
+    state: tauri::State<'_, AppState>,
+    task_id: i64,
+    parent_id: Option<i64>,
+) -> Result<(), String> {
+    let mut db = state.db.lock().await;
+    db.set_parent(task_id, parent_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_task_children(
+    state: tauri::State<'_, AppState>,
+    parent_id: i64,
+) -> Result<Vec<Task>, String> {
+    let db = state.db.lock().await;
+    let children = db.get_children(parent_id).map_err(|e| e.to_string())?;
+    build_task_dtos(&db, children)
+}
+
+#[tauri::command]
+async fn add_task_ref(
+    state: tauri::State<'_, AppState>,
+    task_id: i64,
+    related_task_id: i64,
+    ref_type: String,
+) -> Result<(), String> {
+    let ref_type: mycelium_core::models::TaskRefType =
+        ref_type.parse().map_err(|e: mycelium_core::error::MyceliumError| e.to_string())?;
+    let mut db = state.db.lock().await;
+    db.add_task_ref(task_id, related_task_id, ref_type)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn remove_task_ref(
+    state: tauri::State<'_, AppState>,
+    task_id: i64,
+    related_task_id: i64,
+    ref_type: String,
+) -> Result<(), String> {
+    let ref_type: mycelium_core::models::TaskRefType =
+        ref_type.parse().map_err(|e: mycelium_core::error::MyceliumError| e.to_string())?;
+    let mut db = state.db.lock().await;
+    db.remove_task_ref(task_id, related_task_id, ref_type)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_task_refs(
+    state: tauri::State<'_, AppState>,
+    task_id: i64,
+) -> Result<Vec<TaskRefView>, String> {
+    let db = state.db.lock().await;
+    db.get_task_refs(task_id)
+        .map_err(|e| e.to_string())
+        .map(|refs| refs.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 async fn search_tasks(
     state: tauri::State<'_, AppState>,
     query: String,
@@ -1112,6 +1172,11 @@ fn main() {
             add_dependency,
             remove_dependency,
             get_dependencies,
+            set_task_parent,
+            get_task_children,
+            add_task_ref,
+            remove_task_ref,
+            get_task_refs,
             search_tasks,
             get_all_tags,
             list_followups,

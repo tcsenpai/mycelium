@@ -107,6 +107,25 @@ pub struct DependencyChain {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRefView {
+    pub id: i64,
+    pub ref_type: String,
+    pub other_id: i64,
+    pub title: String,
+}
+
+impl From<mycelium_core::models::TaskRefView> for TaskRefView {
+    fn from(v: mycelium_core::models::TaskRefView) -> Self {
+        TaskRefView {
+            id: v.id,
+            ref_type: v.ref_type.as_str().to_string(),
+            other_id: v.other_id,
+            title: v.title,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardStats {
     pub total_epics: i64,
     pub open_epics: i64,

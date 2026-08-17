@@ -8,6 +8,8 @@ import type {
   Followup,
   FollowupCounts,
   FollowupStatus,
+  TaskRefView,
+  TaskRefType,
 } from './types';
 
 export type TaskUpdateInput = {
@@ -115,6 +117,34 @@ export async function addDependency(taskId: number, dependsOn: number): Promise<
 
 export async function removeDependency(taskId: number, dependsOn: number): Promise<void> {
   return invoke('remove_dependency', { taskId, dependsOn });
+}
+
+export async function setTaskParent(taskId: number, parentId: number | null): Promise<void> {
+  return invoke('set_task_parent', { taskId, parentId });
+}
+
+export async function getTaskChildren(parentId: number): Promise<Task[]> {
+  return invoke('get_task_children', { parentId });
+}
+
+export async function addTaskRef(
+  taskId: number,
+  relatedTaskId: number,
+  refType: TaskRefType,
+): Promise<void> {
+  return invoke('add_task_ref', { taskId, relatedTaskId, refType });
+}
+
+export async function removeTaskRef(
+  taskId: number,
+  relatedTaskId: number,
+  refType: TaskRefType,
+): Promise<void> {
+  return invoke('remove_task_ref', { taskId, relatedTaskId, refType });
+}
+
+export async function getTaskRefs(taskId: number): Promise<TaskRefView[]> {
+  return invoke('get_task_refs', { taskId });
 }
 
 export async function searchTasks(query: string): Promise<Task[]> {
