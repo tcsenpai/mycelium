@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 8;
+const AGENTS_MD_VERSION: u32 = 9;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -41,13 +41,28 @@ myc task list --epic 1
 myc task list --overdue
 myc task list --blocked
 myc task list --all          # include closed tasks
+myc task list --tree         # parent > child hierarchy
+
+# Subtasks (parent/child hierarchy — distinct from epics and dependencies).
+# Group a family of tasks under a "hat" task without inventing an epic.
+myc task create -t "child task" --parent 1
+myc task update 2 --parent 1   # re-parent existing task (use 0 to detach)
 
 # Manage dependencies (task 1 blocks task 2)
 myc task link blocks --task 1 2
 myc deps show 2
 
-# Close tasks (blocked tasks cannot be closed without --force)
+# Non-blocking references between tasks (relates / duplicate). Symmetric,
+# never block or close anything — just mark "these are related / the same".
+myc task link relates 1 2
+myc task link duplicate 1 2
+myc task refs 1               # list a task's references
+myc task ref-unlink 1 2 relates
+
+# Close tasks (blocked tasks cannot be closed without --force).
+# A parent with open subtasks prompts; --cascade closes the whole subtree.
 myc task close 1
+myc task close 1 --cascade
 
 # Assign tasks
 myc assignee create --name "Alice" --github "alice"
@@ -70,7 +85,9 @@ myc export csv
 
 - **Epic**: A large body of work with a title and optional description (e.g., a feature or milestone)
 - **Task**: A unit of work with a title and optional description, optionally linked to an epic
+- **Subtask**: A task with a `parent` task (hierarchy). Distinct from epics (one-level grouping) and dependencies (blocking). Closing a parent never auto-closes children.
 - **Dependency**: Task A blocks Task B (B cannot close until A is closed)
+- **Reference**: A non-blocking, symmetric link between two tasks — `relates` (same family) or `duplicate` (same thing). Marks only; never blocks or closes.
 - **Assignee**: Person assigned to a task (can have GitHub username)
 - **External Ref**: Link to GitHub issues/PRs or URLs
 
