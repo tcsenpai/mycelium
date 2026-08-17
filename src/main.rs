@@ -92,6 +92,7 @@ fn main() {
 
         Commands::Task(cmd) => match cmd {
             TaskCommands::Create {
+                title_pos,
                 title,
                 description,
                 epic,
@@ -103,21 +104,33 @@ fn main() {
                 notes,
                 user_info,
                 template,
-            } => commands::task::create(
-                &title,
-                description.as_deref(),
-                epic,
-                parent,
-                &priority,
-                assignee,
-                due.as_deref(),
-                tags.as_deref(),
-                notes.as_deref(),
-                user_info.as_deref(),
-                template.as_deref(),
-                &cli.format,
-                cli.quiet,
-            ),
+            } => {
+                // Title may come as a positional (`task create "x"`) or the
+                // -t/--title flag; clap makes them mutually exclusive. Require
+                // exactly one so a missing title is a clear error, not a silent
+                // no-op (the positional form is the natural, agent-friendly one).
+                match title_pos.or(title) {
+                    Some(t) => commands::task::create(
+                        &t,
+                        description.as_deref(),
+                        epic,
+                        parent,
+                        &priority,
+                        assignee,
+                        due.as_deref(),
+                        tags.as_deref(),
+                        notes.as_deref(),
+                        user_info.as_deref(),
+                        template.as_deref(),
+                        &cli.format,
+                        cli.quiet,
+                    ),
+                    None => Err(error::MyceliumError::InvalidInput(
+                        "a task title is required: `myc task create \"My title\"` or `--title \"My title\"`"
+                            .to_string(),
+                    )),
+                }
+            }
             TaskCommands::List {
                 epic,
                 status,

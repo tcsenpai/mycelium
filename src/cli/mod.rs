@@ -376,9 +376,13 @@ pub enum EpicCommands {
 pub enum TaskCommands {
     /// Create a new task
     Create {
-        /// Task title
+        /// Task title (positional). Alternative to --title; give exactly one.
+        #[arg(value_name = "TITLE", conflicts_with = "title")]
+        title_pos: Option<String>,
+
+        /// Task title (flag form). Alternative to the positional TITLE.
         #[arg(short, long)]
-        title: String,
+        title: Option<String>,
 
         /// Task description
         #[arg(short, long)]
