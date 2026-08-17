@@ -10,6 +10,7 @@ pub mod external_ref;
 pub mod followup;
 pub mod task;
 pub mod task_note;
+pub mod task_ref;
 
 pub use assignee::Assignee;
 pub use dependency::Dependency;
@@ -19,6 +20,7 @@ pub use external_ref::ExternalRef;
 pub use followup::{Followup, FollowupStatus};
 pub use task::Task;
 pub use task_note::TaskNote;
+pub use task_ref::{TaskRef, TaskRefType, TaskRefView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

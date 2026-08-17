@@ -57,7 +57,7 @@ fn dedupe_ids(ids: &[i64]) -> Vec<i64> {
 /// `self.conn`.
 fn get_task_tx(tx: &Transaction, id: i64) -> Result<Option<Task>> {
     let mut stmt = tx.prepare(
-        "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+        "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at, parent_id
          FROM tasks WHERE id = ?1"
     )?;
 
@@ -78,6 +78,7 @@ fn get_task_tx(tx: &Transaction, id: i64) -> Result<Option<Task>> {
             agent_questions: row.get(11)?,
             created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
             updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+            parent_id: row.get(14)?,
         })
     });
 
@@ -398,7 +399,7 @@ impl Database {
 
     pub fn get_task(&self, id: i64) -> Result<Option<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at, parent_id
              FROM tasks WHERE id = ?1"
         )?;
 
@@ -420,6 +421,7 @@ impl Database {
                 agent_questions: row.get(11)?,
                 created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
                 updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                parent_id: row.get(14)?,
             })
         });
 
@@ -470,7 +472,7 @@ impl Database {
         }
 
         let sql = format!(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at, parent_id
              FROM tasks
              WHERE {}
              ORDER BY
@@ -505,6 +507,7 @@ impl Database {
                 agent_questions: row.get(11)?,
                 created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
                 updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                parent_id: row.get(14)?,
             })
         })?;
 
@@ -824,6 +827,227 @@ impl Database {
         self.conn
             .execute("DELETE FROM assignees WHERE id = ?1", [id])?;
         Ok(())
+    }
+
+    // ---- Task hierarchy (parent/child subtasks) ----
+
+    /// Set (or clear) a task's parent. `parent_id = None` detaches (makes it
+    /// top-level). Guards against self-parenting and cycles (a task cannot
+    /// become a descendant of itself), mirroring the dependency cycle guard:
+    /// BEGIN IMMEDIATE serializes the check+write so two concurrent
+    /// set_parent(1,2)/set_parent(2,1) can't each pass before either writes.
+    pub fn set_parent(&mut self, task_id: i64, parent_id: Option<i64>) -> Result<()> {
+        if self.get_task(task_id)?.is_none() {
+            return Err(MyceliumError::NotFound {
+                entity: "Task".to_string(),
+                id: task_id.to_string(),
+            });
+        }
+
+        if let Some(pid) = parent_id {
+            if pid == task_id {
+                return Err(MyceliumError::InvalidInput(
+                    "A task cannot be its own parent".to_string(),
+                ));
+            }
+            if self.get_task(pid)?.is_none() {
+                return Err(MyceliumError::NotFound {
+                    entity: "Parent task".to_string(),
+                    id: pid.to_string(),
+                });
+            }
+        }
+
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| {
+            if let Some(pid) = parent_id {
+                // Walk up from the proposed parent: if we reach task_id, the
+                // link would close a cycle (task_id is an ancestor of pid).
+                let mut cursor = Some(pid);
+                let mut visited = std::collections::HashSet::new();
+                while let Some(current) = cursor {
+                    if current == task_id {
+                        return Err(MyceliumError::CircularDependency(format!(
+                            "Task {task_id} is already an ancestor of task {pid}"
+                        )));
+                    }
+                    if !visited.insert(current) {
+                        break; // pre-existing cycle guard; stop rather than loop
+                    }
+                    cursor = self.conn.query_row(
+                        "SELECT parent_id FROM tasks WHERE id = ?1",
+                        [current],
+                        |row| row.get::<_, Option<i64>>(0),
+                    )?;
+                }
+            }
+            self.conn.execute(
+                "UPDATE tasks SET parent_id = ?1, updated_at = ?2 WHERE id = ?3",
+                (parent_id, chrono::Local::now().to_rfc3339(), task_id),
+            )?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
+    }
+
+    /// Direct children of a task (one level). Ordered like `list_tasks`
+    /// (priority then recency) for stable tree rendering.
+    pub fn get_children(&self, parent_id: i64) -> Result<Vec<Task>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at, parent_id
+             FROM tasks WHERE parent_id = ?1
+             ORDER BY
+                CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
+                created_at DESC"
+        )?;
+        let rows = stmt.query_map([parent_id], |row| {
+            let due_date: Option<String> = row.get(7)?;
+            Ok(Task {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                status: parse_status(&row.get::<_, String>(3)?)?,
+                priority: parse_priority(&row.get::<_, String>(4)?)?,
+                epic_id: row.get(5)?,
+                assignee_id: row.get(6)?,
+                due_date: due_date
+                    .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+                tags: row.get(8)?,
+                notes: row.get(9)?,
+                user_info: row.get(10)?,
+                agent_questions: row.get(11)?,
+                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                parent_id: row.get(14)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
+    }
+
+    /// Open direct children of a task. Used by the parent-close prompt to warn
+    /// before closing a parent that still has unfinished subtasks.
+    pub fn get_open_children(&self, parent_id: i64) -> Result<Vec<Task>> {
+        Ok(self
+            .get_children(parent_id)?
+            .into_iter()
+            .filter(|t| t.status != Status::Closed)
+            .collect())
+    }
+
+    // ---- Non-blocking task references (relates / duplicate) ----
+
+    /// Add a symmetric, non-blocking reference between two tasks. Stores exactly
+    /// ONE row; reads match both directions. A same-type link in either
+    /// direction is treated as already-present (idempotent, returns Ok without
+    /// a duplicate row). Never touches `dependencies`, so the blocker guard is
+    /// unaffected.
+    pub fn add_task_ref(
+        &mut self,
+        task_id: i64,
+        related_task_id: i64,
+        ref_type: TaskRefType,
+    ) -> Result<()> {
+        if task_id == related_task_id {
+            return Err(MyceliumError::InvalidInput(
+                "A task cannot reference itself".to_string(),
+            ));
+        }
+        for id in [task_id, related_task_id] {
+            if self.get_task(id)?.is_none() {
+                return Err(MyceliumError::NotFound {
+                    entity: "Task".to_string(),
+                    id: id.to_string(),
+                });
+            }
+        }
+        // Already linked in EITHER direction with this type? Nothing to do.
+        let exists: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_refs
+             WHERE ref_type = ?1
+               AND ((task_id = ?2 AND related_task_id = ?3)
+                 OR (task_id = ?3 AND related_task_id = ?2)))",
+            (ref_type.as_str(), task_id, related_task_id),
+            |row| row.get(0),
+        )?;
+        if exists {
+            return Ok(());
+        }
+        self.conn.execute(
+            "INSERT INTO task_refs (task_id, related_task_id, ref_type, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            (
+                task_id,
+                related_task_id,
+                ref_type.as_str(),
+                chrono::Local::now().to_rfc3339(),
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// Remove a reference between two tasks (both directions). Returns the
+    /// number of rows deleted so callers can distinguish "unlinked" from
+    /// "nothing matched".
+    pub fn remove_task_ref(
+        &mut self,
+        task_id: i64,
+        related_task_id: i64,
+        ref_type: TaskRefType,
+    ) -> Result<usize> {
+        let affected = self.conn.execute(
+            "DELETE FROM task_refs
+             WHERE ref_type = ?1
+               AND ((task_id = ?2 AND related_task_id = ?3)
+                 OR (task_id = ?3 AND related_task_id = ?2))",
+            (ref_type.as_str(), task_id, related_task_id),
+        )?;
+        Ok(affected)
+    }
+
+    /// All references touching `task_id`, from that task's perspective. The
+    /// OTHER task is resolved (id + title) regardless of which side stored the
+    /// row, so symmetry is visible: `refs A` shows a link created as
+    /// `relates B A`.
+    pub fn get_task_refs(&self, task_id: i64) -> Result<Vec<TaskRefView>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.id, r.ref_type,
+                    CASE WHEN r.task_id = ?1 THEN r.related_task_id ELSE r.task_id END AS other_id,
+                    t.title
+             FROM task_refs r
+             JOIN tasks t
+               ON t.id = CASE WHEN r.task_id = ?1 THEN r.related_task_id ELSE r.task_id END
+             WHERE r.task_id = ?1 OR r.related_task_id = ?1
+             ORDER BY r.created_at DESC",
+        )?;
+        let rows = stmt.query_map([task_id], |row| {
+            let type_str: String = row.get(1)?;
+            let ref_type = type_str.parse::<TaskRefType>().map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            Ok(TaskRefView {
+                id: row.get(0)?,
+                ref_type,
+                other_id: row.get(2)?,
+                title: row.get(3)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     // Dependency operations
@@ -1688,7 +1912,7 @@ impl Database {
     /// List all tasks (no filtering). Used by sync.
     pub fn list_all_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at, parent_id
              FROM tasks ORDER BY id"
         )?;
         let tasks = stmt.query_map([], |row| {
@@ -1709,6 +1933,7 @@ impl Database {
                 agent_questions: row.get(11)?,
                 created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
                 updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                parent_id: row.get(14)?,
             })
         })?;
         tasks
@@ -1719,7 +1944,7 @@ impl Database {
     /// List tasks that have no epic assigned.
     pub fn list_orphan_tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at, parent_id
              FROM tasks WHERE epic_id IS NULL ORDER BY id"
         )?;
         let tasks = stmt.query_map([], |row| {
@@ -1740,6 +1965,7 @@ impl Database {
                 agent_questions: row.get(11)?,
                 created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
                 updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                parent_id: row.get(14)?,
             })
         })?;
         tasks
