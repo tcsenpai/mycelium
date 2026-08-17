@@ -1416,6 +1416,7 @@ textarea {
 .detail-editor-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .detail-field select,
@@ -1450,6 +1451,26 @@ textarea {
   border-radius: var(--r-md);
   border: 1px dashed var(--surface-3);
   color: var(--muted);
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.detail-ref-list {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.detail-ref-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.detail-ref-item .mini-task {
+  flex: 1;
 }
 
 .mini-columns {

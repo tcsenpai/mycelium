@@ -23,6 +23,7 @@ import {
   FolderOpen,
   Layers3,
   LayoutDashboard,
+  Link2,
   Loader,
   MessageCircle,
   Network,
@@ -39,6 +40,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  addTaskRef,
   appendFollowup,
   askClaude,
   claudeAvailable,
@@ -53,12 +55,16 @@ import {
   getDashboardStats,
   getEpics,
   getRecentFolders,
+  getTaskChildren,
+  getTaskRefs,
   getTasks,
   listFollowups,
   openFolder,
   openFolderDialog,
+  removeTaskRef,
   reopenTask,
   setFollowupStatus,
+  setTaskParent,
   updateTask,
 } from './lib/api';
 import type { TaskUpdateInput } from './lib/api';
@@ -71,6 +77,8 @@ import type {
   Priority,
   Status,
   Task,
+  TaskRefType,
+  TaskRefView,
 } from './lib/types';
 import { displayId, followupStatusColors, followupStatusLabels } from './lib/types';
 
@@ -85,6 +93,8 @@ const QUERY_KEYS = {
   followups: ['followups'],
   followupCounts: ['followup-counts'],
   claude: ['claude-available'],
+  taskChildren: (taskId: number) => ['task-children', taskId],
+  taskRefs: (taskId: number) => ['task-refs', taskId],
 };
 
 type StatusFilter = 'open' | 'in_progress' | 'closed' | 'blocked' | 'overdue';
@@ -550,6 +560,9 @@ function App() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [composer, setComposer] = useState<ComposerState>(initialComposerState);
   const [detailDraft, setDetailDraft] = useState<DetailDraft>({ title: '', description: '', tags: '' });
+  const [parentIdDraft, setParentIdDraft] = useState('');
+  const [refIdDraft, setRefIdDraft] = useState('');
+  const [refTypeDraft, setRefTypeDraft] = useState<TaskRefType>('relates');
   const [railWidth, setRailWidth] = useState(320);
   const [detailWidth, setDetailWidth] = useState(360);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -983,6 +996,73 @@ function App() {
     null;
 
   const editingTask = editingTaskId !== null ? tasks.find((task) => task.id === editingTaskId) ?? null : null;
+
+  const taskChildrenQuery = useQuery({
+    queryKey: selectedTask ? QUERY_KEYS.taskChildren(selectedTask.id) : ['task-children', 'none'],
+    queryFn: () => getTaskChildren(selectedTask!.id),
+    enabled: selectedTask !== null,
+  });
+  const taskChildren = taskChildrenQuery.data ?? [];
+
+  const taskRefsQuery = useQuery({
+    queryKey: selectedTask ? QUERY_KEYS.taskRefs(selectedTask.id) : ['task-refs', 'none'],
+    queryFn: () => getTaskRefs(selectedTask!.id),
+    enabled: selectedTask !== null,
+  });
+  const taskRefs: TaskRefView[] = taskRefsQuery.data ?? [];
+
+  const setParentMutation = useMutation({
+    mutationFn: ({ taskId, parentId }: { taskId: number; parentId: number | null }) =>
+      setTaskParent(taskId, parentId),
+    onSuccess: async () => {
+      setErrorMessage(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.tasks }),
+        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.taskChildren(selectedTaskId ?? -1) }),
+      ]);
+    },
+    onError: (error) => {
+      setErrorMessage(describeError(error));
+    },
+  });
+
+  const addTaskRefMutation = useMutation({
+    mutationFn: ({
+      taskId,
+      relatedTaskId,
+      refType,
+    }: {
+      taskId: number;
+      relatedTaskId: number;
+      refType: TaskRefType;
+    }) => addTaskRef(taskId, relatedTaskId, refType),
+    onSuccess: async (_data, variables) => {
+      setErrorMessage(null);
+      await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.taskRefs(variables.taskId) });
+    },
+    onError: (error) => {
+      setErrorMessage(describeError(error));
+    },
+  });
+
+  const removeTaskRefMutation = useMutation({
+    mutationFn: ({
+      taskId,
+      relatedTaskId,
+      refType,
+    }: {
+      taskId: number;
+      relatedTaskId: number;
+      refType: TaskRefType;
+    }) => removeTaskRef(taskId, relatedTaskId, refType),
+    onSuccess: async (_data, variables) => {
+      setErrorMessage(null);
+      await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.taskRefs(variables.taskId) });
+    },
+    onError: (error) => {
+      setErrorMessage(describeError(error));
+    },
+  });
 
   useEffect(() => {
     setDetailDraft({
@@ -2220,6 +2300,134 @@ function App() {
                   <div className="detail-strip">
                     <span>{selectedTask.tags ? selectedTask.tags : 'No tags'}</span>
                   </div>
+
+                  <div className="panel-head">
+                    <div>
+                      <p className="eyebrow">Hierarchy</p>
+                      <h3>Subtasks</h3>
+                    </div>
+                  </div>
+                  <div className="detail-strip">
+                    <span>
+                      Parent:{' '}
+                      {selectedTask.parent_id ? displayId('task', selectedTask.parent_id) : 'None'}
+                    </span>
+                    {selectedTask.parent_id ? (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() =>
+                          setParentMutation.mutate({ taskId: selectedTask.id, parentId: null })
+                        }
+                        disabled={setParentMutation.isPending}
+                      >
+                        <X size={14} />
+                        <span>Clear parent</span>
+                      </button>
+                    ) : null}
+                  </div>
+                  <form
+                    className="detail-editor-actions"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const parentId = Number(parentIdDraft);
+                      if (!parentIdDraft || Number.isNaN(parentId)) return;
+                      setParentMutation.mutate({ taskId: selectedTask.id, parentId });
+                      setParentIdDraft('');
+                    }}
+                  >
+                    <input
+                      value={parentIdDraft}
+                      onChange={(event) => setParentIdDraft(event.target.value)}
+                      placeholder="Parent task ID"
+                      disabled={setParentMutation.isPending}
+                    />
+                    <button className="primary-button" type="submit" disabled={setParentMutation.isPending}>
+                      <span>Set parent</span>
+                    </button>
+                  </form>
+                  <MiniPanel
+                    title="Children"
+                    items={taskChildren.map((child) => ({
+                      id: child.id,
+                      label: child.title,
+                      meta: statusLabel(child.status),
+                      onClick: () => startTransition(() => setSelectedTaskId(child.id)),
+                    }))}
+                    emptyMessage="No subtasks."
+                  />
+
+                  <div className="panel-head">
+                    <div>
+                      <p className="eyebrow">Links</p>
+                      <h3>References</h3>
+                    </div>
+                  </div>
+                  <form
+                    className="detail-editor-actions"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const relatedTaskId = Number(refIdDraft);
+                      if (!refIdDraft || Number.isNaN(relatedTaskId)) return;
+                      addTaskRefMutation.mutate({
+                        taskId: selectedTask.id,
+                        relatedTaskId,
+                        refType: refTypeDraft,
+                      });
+                      setRefIdDraft('');
+                    }}
+                  >
+                    <input
+                      value={refIdDraft}
+                      onChange={(event) => setRefIdDraft(event.target.value)}
+                      placeholder="Related task ID"
+                      disabled={addTaskRefMutation.isPending}
+                    />
+                    <select
+                      value={refTypeDraft}
+                      onChange={(event) => setRefTypeDraft(event.target.value as TaskRefType)}
+                      disabled={addTaskRefMutation.isPending}
+                    >
+                      <option value="relates">Relates</option>
+                      <option value="duplicate">Duplicate</option>
+                    </select>
+                    <button className="primary-button" type="submit" disabled={addTaskRefMutation.isPending}>
+                      <Link2 size={14} />
+                      <span>Add ref</span>
+                    </button>
+                  </form>
+                  {taskRefs.length === 0 ? (
+                    <p className="mini-empty">No references.</p>
+                  ) : (
+                    <ul className="detail-ref-list">
+                      {taskRefs.map((ref) => (
+                        <li key={ref.id} className="detail-ref-item">
+                          <button
+                            type="button"
+                            className="mini-task is-clickable"
+                            onClick={() => startTransition(() => setSelectedTaskId(ref.other_id))}
+                          >
+                            <strong>{ref.title}</strong>
+                            <span>{ref.ref_type}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() =>
+                              removeTaskRefMutation.mutate({
+                                taskId: selectedTask.id,
+                                relatedTaskId: ref.other_id,
+                                refType: ref.ref_type,
+                              })
+                            }
+                            disabled={removeTaskRefMutation.isPending}
+                          >
+                            <X size={14} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
 
                   <div className="mini-columns">
                     <MiniPanel
