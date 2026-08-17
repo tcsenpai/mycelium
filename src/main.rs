@@ -95,6 +95,7 @@ fn main() {
                 title,
                 description,
                 epic,
+                parent,
                 priority,
                 assignee,
                 due,
@@ -106,6 +107,7 @@ fn main() {
                 &title,
                 description.as_deref(),
                 epic,
+                parent,
                 &priority,
                 assignee,
                 due.as_deref(),
@@ -125,6 +127,7 @@ fn main() {
                 overdue,
                 tag,
                 all,
+                tree,
             } => commands::task::list(
                 epic,
                 status.as_deref(),
@@ -134,6 +137,7 @@ fn main() {
                 overdue,
                 tag.as_deref(),
                 all,
+                tree,
                 &cli.format,
                 cli.quiet,
             ),
@@ -146,6 +150,7 @@ fn main() {
                 status,
                 priority,
                 epic,
+                parent,
                 assignee,
                 due,
                 tags,
@@ -159,6 +164,7 @@ fn main() {
                 status.as_deref(),
                 priority.as_deref(),
                 epic,
+                parent,
                 assignee,
                 due.as_deref(),
                 tags.as_deref(),
@@ -184,9 +190,23 @@ fn main() {
                 LinkCommands::Blocks { task, blocked } => {
                     commands::task::link_blocks(task, blocked, cli.quiet)
                 }
+                LinkCommands::Relates { task, other } => {
+                    commands::task::link_ref(task, other, "relates", cli.quiet)
+                }
+                LinkCommands::Duplicate { task, other } => {
+                    commands::task::link_ref(task, other, "duplicate", cli.quiet)
+                }
             },
             TaskCommands::Unlink { ref_id } => commands::task::unlink_ref(ref_id, cli.quiet),
-            TaskCommands::Close { id, force } => commands::task::close(id, force, cli.quiet),
+            TaskCommands::Refs { id } => commands::task::refs(id, &cli.format, cli.quiet),
+            TaskCommands::RefUnlink {
+                task,
+                other,
+                ref_type,
+            } => commands::task::ref_unlink(task, other, &ref_type, cli.quiet),
+            TaskCommands::Close { id, force, cascade } => {
+                commands::task::close(id, force, cascade, cli.quiet)
+            }
             TaskCommands::Reopen { id } => commands::task::reopen(id, cli.quiet),
             TaskCommands::Note { task_id, content } => {
                 commands::task::add_note(task_id, &content, &cli.format, cli.quiet)
@@ -249,6 +269,7 @@ fn main() {
             args.overdue,
             args.tag.as_deref(),
             args.all,
+            args.tree,
             &cli.format,
             cli.quiet,
         ),

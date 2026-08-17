@@ -2,12 +2,12 @@ use crate::error::Result;
 use rusqlite::Connection;
 
 /// Latest schema version this build migrates to.
-pub const CURRENT_VERSION: i32 = 6;
+pub const CURRENT_VERSION: i32 = 8;
 
 /// Every application table this schema version is expected to have created.
 /// Single source of truth for tooling (e.g. `myc doctor`) that needs to verify
 /// the database structure without hard-coding a stale table list. Keep this in
-/// sync with the `CREATE TABLE` statements across `migrate_v1`..`migrate_v6`.
+/// sync with the `CREATE TABLE` statements across `migrate_v1`..`migrate_v8`.
 pub const EXPECTED_TABLES: &[&str] = &[
     "epics",
     "assignees",
@@ -18,6 +18,7 @@ pub const EXPECTED_TABLES: &[&str] = &[
     "linear_sync",
     "epic_notes",
     "followups",
+    "task_refs",
 ];
 
 /// The schema version recorded in the database (MAX of the _migrations table),
@@ -62,6 +63,16 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         set_version(conn, 6)?;
     }
 
+    if version < 7 {
+        migrate_v7(conn)?;
+        set_version(conn, 7)?;
+    }
+
+    if version < 8 {
+        migrate_v8(conn)?;
+        set_version(conn, 8)?;
+    }
+
     // Cross-branch safety net. The linear `version < N` gate above skips a
     // migration whose number was already recorded on a *different* branch
     // (e.g. branch A's v6 = embeddings, branch B's v6 = followups: switching
@@ -69,17 +80,28 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     // missing). Re-asserting every table/index/column idempotently repairs that
     // mismatch without a migration-ID rewrite.
     //
-    // Guard on a sentinel table so the healthy path issues ZERO writes on
-    // startup — re-running DDL on every open added write contention under
-    // concurrent CLI invocations. We only re-assert when something is actually
-    // missing (the branch-switch repair case).
-    // ponytail: idempotent DDL re-assert, upgrade to checksum-tracked
-    // migrations if per-branch column drift ever appears.
-    if !table_exists(conn, "followups")? {
+    // Guard on sentinels so the healthy path issues ZERO writes on startup —
+    // re-running DDL on every open added write contention under concurrent CLI
+    // invocations. We only re-assert when something is actually missing (the
+    // branch-switch repair case). One sentinel per schema-version that adds a
+    // table/column reachable by ensure_schema: a single sentinel would miss
+    // drift in any OTHER object (e.g. followups present but task_refs dropped).
+    // ponytail: sentinel set, upgrade to checksum-tracked migrations if
+    // per-branch drift ever outgrows this.
+    let needs_heal = !table_exists(conn, "followups")? // v6
+        || !table_exists(conn, "task_refs")?           // v7
+        || !column_exists(conn, "tasks", "parent_id")?; // v8
+    if needs_heal {
         ensure_schema(conn)?;
     }
 
     Ok(())
+}
+
+/// True if `column` exists on `table`. Used by the self-heal sentinel to detect
+/// a dropped ALTER-added column (e.g. tasks.parent_id) after a branch switch.
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    Ok(table_columns(conn, table)?.iter().any(|c| c == column))
 }
 
 /// Whether a table exists (used to gate the schema re-assert).
@@ -119,6 +141,8 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
     migrate_v3(conn)?;
     migrate_v4(conn)?;
     migrate_v6(conn)?;
+    migrate_v7(conn)?; // task_refs table (IF NOT EXISTS)
+
     // epic_notes table from v5 (also IF NOT EXISTS).
     conn.execute(
         "CREATE TABLE IF NOT EXISTS epic_notes (
@@ -149,6 +173,15 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
         add_column_if_missing(conn, "tasks", col, ddl)?; // v5
         add_column_if_missing(conn, "epics", col, ddl)?; // v5
     }
+
+    // v8: task hierarchy (parent_id). ALTER is guarded; the index is IF NOT
+    // EXISTS. No FK clause on ALTER ADD COLUMN (SQLite can't add one that way);
+    // integrity is enforced in application code (set_parent guards cycles/self).
+    add_column_if_missing(conn, "tasks", "parent_id", "parent_id INTEGER")?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)",
+        [],
+    )?;
 
     Ok(())
 }
@@ -417,6 +450,55 @@ fn migrate_v6(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_v7(conn: &Connection) -> Result<()> {
+    // Non-blocking references between tasks (relates / duplicate). Kept in a
+    // SEPARATE table from `dependencies` on purpose: the dependency guard
+    // (get_open_blockers) reads `dependencies` to gate state transitions, so a
+    // 'relates' row living there would poison transitions with a phantom
+    // blocker. task_refs is invisible to the guard by construction.
+    //
+    // The relation is symmetric: exactly ONE row is stored per link, and reads
+    // match both directions (WHERE task_id = ? OR related_task_id = ?). The
+    // UNIQUE constraint dedupes an exact (a, b, type) re-link; the reverse
+    // (b, a, type) is prevented in application code before insert.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS task_refs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            related_task_id INTEGER NOT NULL,
+            ref_type TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (related_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            UNIQUE(task_id, related_task_id, ref_type)
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_refs_task ON task_refs(task_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_refs_related ON task_refs(related_task_id)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn migrate_v8(conn: &Connection) -> Result<()> {
+    // Task hierarchy: an optional self-referential parent. NULL = top-level.
+    // ALTER ADD COLUMN cannot carry a FOREIGN KEY in SQLite, so referential
+    // integrity (no self-parent, no cycles, detach via 0->NULL) is enforced in
+    // application code (Database::set_parent). Guarded because ALTER is not
+    // idempotent; the index is IF NOT EXISTS.
+    add_column_if_missing(conn, "tasks", "parent_id", "parent_id INTEGER")?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)",
+        [],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,6 +512,20 @@ mod tests {
         .unwrap()
     }
 
+    fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+        // PRAGMA table_info can't be parameterized; table names here are test
+        // literals, not user input.
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        cols.iter().any(|c| c == column)
+    }
+
     #[test]
     fn fresh_db_gets_full_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -441,10 +537,42 @@ mod tests {
             "task_notes",
             "epic_notes",
             "followups",
+            "task_refs",
         ] {
             assert!(table_exists(&conn, t), "missing table {t}");
         }
+        assert!(
+            column_exists(&conn, "tasks", "parent_id"),
+            "tasks.parent_id missing"
+        );
         assert_eq!(get_current_version(&conn).unwrap(), CURRENT_VERSION);
+    }
+
+    #[test]
+    fn task_refs_self_heals_after_drop() {
+        // Same cross-branch scenario as followups: version says 8 but the
+        // task_refs table was dropped. ensure_schema must recreate it.
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute("DROP TABLE task_refs", []).unwrap();
+        assert!(!table_exists(&conn, "task_refs"));
+        run_migrations(&mut conn).unwrap();
+        assert!(
+            table_exists(&conn, "task_refs"),
+            "task_refs not repaired by ensure_schema"
+        );
+    }
+
+    #[test]
+    fn parent_id_column_survives_re_migration() {
+        // parent_id is added via ALTER; re-running migrations must not error
+        // (add_column_if_missing guards the duplicate ALTER) and the column
+        // must persist.
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        assert!(column_exists(&conn, "tasks", "parent_id"));
+        run_migrations(&mut conn).unwrap();
+        assert!(column_exists(&conn, "tasks", "parent_id"));
     }
 
     #[test]
@@ -456,10 +584,12 @@ mod tests {
         run_migrations(&mut conn).unwrap();
         conn.execute("DROP TABLE followups", []).unwrap();
         assert!(!table_exists(&conn, "followups"));
-        // _migrations still says version 6.
-        assert_eq!(get_current_version(&conn).unwrap(), 6);
+        // _migrations still says the latest version — the version gate would
+        // skip every migrate_vN, so only the ensure_schema sentinel can repair.
+        assert_eq!(get_current_version(&conn).unwrap(), CURRENT_VERSION);
 
-        // Re-run: gate skips (version already 6), ensure_schema repairs.
+        // Re-run: version gate skips, sentinel detects the missing table,
+        // ensure_schema repairs.
         run_migrations(&mut conn).unwrap();
         assert!(table_exists(&conn, "followups"), "followups not repaired");
     }

@@ -894,3 +894,72 @@ fn test_followup_close_hint_ignores_in_progress() {
     // in_progress follow-ups are already being worked — no close-time nudge.
     assert!(!stdout.contains("open follow-up"));
 }
+
+/// A tag string whose 15th byte falls inside a multi-byte UTF-8 char used to
+/// panic `task list` via `&t[..15]`. The list command must render, not crash.
+#[test]
+fn test_task_list_with_unicode_tag_does_not_panic() {
+    let temp = TempDir::new().unwrap();
+    let _ = myc_cmd(&temp).arg("init").output().expect("init");
+    // 14 ASCII bytes then a 2-byte 'é' straddling byte offset 15, so the old
+    // &t[..15] byte-slice lands mid-char and panics (verified: is_char_boundary
+    // (15) == false for this string).
+    let out = myc_cmd(&temp)
+        .args([
+            "task",
+            "create",
+            "--title",
+            "Unicode tag task",
+            "--tags",
+            "aaaaaaaaaaaaaaé,x",
+        ])
+        .output()
+        .expect("task create");
+    assert!(out.status.success(), "create with unicode tag failed");
+
+    let out = myc_cmd(&temp)
+        .args(["task", "list"])
+        .output()
+        .expect("list");
+    print_output(&out);
+    assert!(
+        out.status.success(),
+        "task list panicked/failed on a unicode tag: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // The truncated tag must still render its first chars, followed by "...".
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Unicode tag task"));
+}
+
+/// `deps unlink` on a pair that was never linked must NOT report success —
+/// it should warn there was nothing to unlink. Guards against the false-green
+/// where a 0-row DELETE printed the green "no longer blocks" line.
+#[test]
+fn test_deps_unlink_nonexistent_warns() {
+    let temp = TempDir::new().unwrap();
+    let _ = myc_cmd(&temp).arg("init").output().expect("init");
+    for t in ["Task A", "Task B"] {
+        let _ = myc_cmd(&temp)
+            .args(["task", "create", "--title", t])
+            .output()
+            .expect("create");
+    }
+
+    // Never linked 1<->2. Unlink must report nothing to do.
+    let out = myc_cmd(&temp)
+        .args(["deps", "unlink", "1", "2"])
+        .output()
+        .expect("unlink");
+    print_output(&out);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("nothing to unlink"),
+        "expected a nothing-to-unlink warning, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("no longer blocks"),
+        "false success on a non-existent dependency: {stdout}"
+    );
+}

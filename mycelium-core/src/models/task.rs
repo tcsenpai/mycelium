@@ -11,6 +11,9 @@ pub struct Task {
     pub status: Status,
     pub priority: Priority,
     pub epic_id: Option<i64>,
+    /// Parent task for hierarchy (subtasks). `None` = top-level. Distinct from
+    /// `epic_id` (one-level grouping) and dependencies (directional blocking).
+    pub parent_id: Option<i64>,
     pub assignee_id: Option<i64>,
     pub due_date: Option<NaiveDate>,
     pub tags: Option<String>,
@@ -31,6 +34,7 @@ impl Task {
             status: Status::Open,
             priority: Priority::Medium,
             epic_id: None,
+            parent_id: None,
             assignee_id: None,
             due_date: None,
             tags: None,

@@ -2,7 +2,7 @@
 //! Covers CRUD round-trips and the serde representation of the enums (which
 //! must match the on-disk DB strings, e.g. "in_progress").
 
-use mycelium_core::models::{FollowupStatus, Priority, Status};
+use mycelium_core::models::{FollowupStatus, Priority, Status, TaskRefType};
 use mycelium_core::Database;
 
 fn db() -> Database {
@@ -781,4 +781,197 @@ fn update_task_can_still_clear_refs() {
         )
         .expect("clearing the epic is allowed");
     assert_eq!(cleared.epic_id, None);
+}
+
+// ---- Task hierarchy (parent/child subtasks) ----
+
+/// Make a bare task with just a title, returning its id. Keeps the ref/parent
+/// tests readable.
+fn mk(db: &mut Database, title: &str) -> i64 {
+    db.create_task(
+        title,
+        None,
+        None,
+        Priority::Medium,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap()
+    .id
+}
+
+#[test]
+fn set_parent_and_detach() {
+    let mut db = db();
+    let parent = mk(&mut db, "parent");
+    let child = mk(&mut db, "child");
+
+    db.set_parent(child, Some(parent)).unwrap();
+    assert_eq!(db.get_task(child).unwrap().unwrap().parent_id, Some(parent));
+    assert_eq!(
+        db.get_children(parent)
+            .unwrap()
+            .iter()
+            .map(|t| t.id)
+            .collect::<Vec<_>>(),
+        vec![child]
+    );
+
+    // Detach (0 -> None at the CLI boundary; core takes None).
+    db.set_parent(child, None).unwrap();
+    assert_eq!(db.get_task(child).unwrap().unwrap().parent_id, None);
+    assert!(db.get_children(parent).unwrap().is_empty());
+}
+
+#[test]
+fn set_parent_rejects_self_and_cycles() {
+    let mut db = db();
+    let a = mk(&mut db, "a");
+    let b = mk(&mut db, "b");
+    let c = mk(&mut db, "c");
+
+    // self-parent
+    assert!(db.set_parent(a, Some(a)).is_err());
+
+    // a -> b -> c chain, then try c as ancestor of a (would cycle)
+    db.set_parent(b, Some(a)).unwrap();
+    db.set_parent(c, Some(b)).unwrap();
+    // making a a child of c closes the loop a->b->c->a
+    assert!(
+        db.set_parent(a, Some(c)).is_err(),
+        "cycle through the parent chain must be rejected"
+    );
+    // the rejected write must not have persisted
+    assert_eq!(db.get_task(a).unwrap().unwrap().parent_id, None);
+}
+
+#[test]
+fn set_parent_missing_task_or_parent_errors() {
+    let mut db = db();
+    let a = mk(&mut db, "a");
+    assert!(db.set_parent(9999, Some(a)).is_err(), "missing child");
+    assert!(db.set_parent(a, Some(9999)).is_err(), "missing parent");
+}
+
+#[test]
+fn open_children_excludes_closed() {
+    let mut db = db();
+    let parent = mk(&mut db, "parent");
+    let c1 = mk(&mut db, "c1");
+    let c2 = mk(&mut db, "c2");
+    db.set_parent(c1, Some(parent)).unwrap();
+    db.set_parent(c2, Some(parent)).unwrap();
+    // close c2 via update_task status
+    db.update_task(
+        c2,
+        None,
+        None,
+        Some(Status::Closed),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let open = db.get_open_children(parent).unwrap();
+    assert_eq!(open.iter().map(|t| t.id).collect::<Vec<_>>(), vec![c1]);
+}
+
+// ---- Non-blocking task references (relates / duplicate) ----
+
+#[test]
+fn task_ref_is_symmetric() {
+    let mut db = db();
+    let a = mk(&mut db, "a");
+    let b = mk(&mut db, "b");
+
+    // create as relates(a, b); refs from B's side must show A.
+    db.add_task_ref(a, b, TaskRefType::Relates).unwrap();
+    let from_b = db.get_task_refs(b).unwrap();
+    assert_eq!(from_b.len(), 1);
+    assert_eq!(from_b[0].other_id, a);
+    assert_eq!(from_b[0].ref_type, TaskRefType::Relates);
+
+    let from_a = db.get_task_refs(a).unwrap();
+    assert_eq!(from_a[0].other_id, b);
+}
+
+#[test]
+fn task_ref_is_idempotent_both_directions() {
+    let mut db = db();
+    let a = mk(&mut db, "a");
+    let b = mk(&mut db, "b");
+    db.add_task_ref(a, b, TaskRefType::Relates).unwrap();
+    // same link, reversed args, same type -> no second row
+    db.add_task_ref(b, a, TaskRefType::Relates).unwrap();
+    assert_eq!(db.get_task_refs(a).unwrap().len(), 1);
+    // but a DIFFERENT type is a distinct link
+    db.add_task_ref(a, b, TaskRefType::Duplicate).unwrap();
+    assert_eq!(db.get_task_refs(a).unwrap().len(), 2);
+}
+
+#[test]
+fn task_ref_rejects_self_and_missing() {
+    let mut db = db();
+    let a = mk(&mut db, "a");
+    assert!(
+        db.add_task_ref(a, a, TaskRefType::Relates).is_err(),
+        "self-ref"
+    );
+    assert!(
+        db.add_task_ref(a, 9999, TaskRefType::Relates).is_err(),
+        "missing other"
+    );
+}
+
+#[test]
+fn remove_task_ref_both_directions() {
+    let mut db = db();
+    let a = mk(&mut db, "a");
+    let b = mk(&mut db, "b");
+    db.add_task_ref(a, b, TaskRefType::Duplicate).unwrap();
+    // remove using reversed args must still delete the single stored row
+    let n = db.remove_task_ref(b, a, TaskRefType::Duplicate).unwrap();
+    assert_eq!(n, 1);
+    assert!(db.get_task_refs(a).unwrap().is_empty());
+    // removing again matches nothing
+    assert_eq!(db.remove_task_ref(a, b, TaskRefType::Duplicate).unwrap(), 0);
+}
+
+#[test]
+fn task_ref_does_not_block_state_transitions() {
+    // The whole point of a separate table: a relates/duplicate ref must NOT
+    // register as a blocker, so a task with only refs can still move states.
+    let mut db = db();
+    let a = mk(&mut db, "a");
+    let b = mk(&mut db, "b");
+    db.add_task_ref(a, b, TaskRefType::Relates).unwrap();
+    db.add_task_ref(a, b, TaskRefType::Duplicate).unwrap();
+    assert!(
+        db.get_open_blockers(a).unwrap().is_empty(),
+        "refs are not blockers"
+    );
+    // moving to in_progress / closed must succeed (no phantom blocker)
+    db.update_task(
+        a,
+        None,
+        None,
+        Some(Status::InProgress),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("refs must not gate transitions");
 }

@@ -1,5 +1,5 @@
 use crate::cli::OutputFormat;
-use crate::commands::{ensure_initialized, tid, INFO_PREFIX, SUCCESS_PREFIX};
+use crate::commands::{ensure_initialized, tid, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
 use crate::error::Result;
 use colored::Colorize;
 
@@ -78,15 +78,24 @@ pub fn show(task_id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
 pub fn unlink(task_id: i64, blocked_task_id: i64, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
 
-    db.remove_dependency(blocked_task_id, task_id)?;
+    let removed = db.remove_dependency(blocked_task_id, task_id)?;
 
     if !quiet {
-        println!(
-            "{} Task {} no longer blocks task {}",
-            SUCCESS_PREFIX.green(),
-            tid(task_id),
-            tid(blocked_task_id)
-        );
+        if removed == 0 {
+            println!(
+                "{} Task {} did not block task {}; nothing to unlink",
+                WARNING_PREFIX.yellow(),
+                tid(task_id),
+                tid(blocked_task_id)
+            );
+        } else {
+            println!(
+                "{} Task {} no longer blocks task {}",
+                SUCCESS_PREFIX.green(),
+                tid(task_id),
+                tid(blocked_task_id)
+            );
+        }
     }
     Ok(())
 }

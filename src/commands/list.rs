@@ -1,6 +1,7 @@
 use crate::cli::OutputFormat;
 use crate::error::Result;
 
+#[allow(clippy::too_many_arguments)]
 pub fn execute(
     epic_id: Option<i64>,
     status: Option<&str>,
@@ -10,6 +11,7 @@ pub fn execute(
     overdue: bool,
     tag: Option<&str>,
     all: bool,
+    tree: bool,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
@@ -23,6 +25,7 @@ pub fn execute(
         overdue,
         tag,
         all,
+        tree,
         format,
         quiet,
     )

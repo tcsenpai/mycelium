@@ -20,6 +20,9 @@ pub struct Task {
     pub priority: Priority,
     pub epic_id: Option<i64>,
     pub epic_title: Option<String>,
+    /// Parent task for hierarchy (subtasks). Read-only passthrough from core;
+    /// the GUI does not yet create/edit subtasks (CLI-only for now).
+    pub parent_id: Option<i64>,
     pub assignee_id: Option<i64>,
     pub assignee_name: Option<String>,
     pub due_date: Option<NaiveDate>,
@@ -426,6 +429,7 @@ pub fn task_from_core(
         priority: t.priority.into(),
         epic_id: t.epic_id,
         epic_title,
+        parent_id: t.parent_id,
         assignee_id: t.assignee_id,
         assignee_name,
         due_date: t.due_date,

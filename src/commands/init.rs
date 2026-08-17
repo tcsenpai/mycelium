@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 8;
+const AGENTS_MD_VERSION: u32 = 9;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -41,13 +41,28 @@ myc task list --epic 1
 myc task list --overdue
 myc task list --blocked
 myc task list --all          # include closed tasks
+myc task list --tree         # parent > child hierarchy
+
+# Subtasks (parent/child hierarchy — distinct from epics and dependencies).
+# Group a family of tasks under a "hat" task without inventing an epic.
+myc task create -t "child task" --parent 1
+myc task update 2 --parent 1   # re-parent existing task (use 0 to detach)
 
 # Manage dependencies (task 1 blocks task 2)
 myc task link blocks --task 1 2
 myc deps show 2
 
-# Close tasks (blocked tasks cannot be closed without --force)
+# Non-blocking references between tasks (relates / duplicate). Symmetric,
+# never block or close anything — just mark "these are related / the same".
+myc task link relates 1 2
+myc task link duplicate 1 2
+myc task refs 1               # list a task's references
+myc task ref-unlink 1 2 relates
+
+# Close tasks (blocked tasks cannot be closed without --force).
+# A parent with open subtasks prompts; --cascade closes the whole subtree.
 myc task close 1
+myc task close 1 --cascade
 
 # Assign tasks
 myc assignee create --name "Alice" --github "alice"
@@ -70,7 +85,9 @@ myc export csv
 
 - **Epic**: A large body of work with a title and optional description (e.g., a feature or milestone)
 - **Task**: A unit of work with a title and optional description, optionally linked to an epic
+- **Subtask**: A task with a `parent` task (hierarchy). Distinct from epics (one-level grouping) and dependencies (blocking). Closing a parent never auto-closes children.
 - **Dependency**: Task A blocks Task B (B cannot close until A is closed)
+- **Reference**: A non-blocking, symmetric link between two tasks — `relates` (same family) or `duplicate` (same thing). Marks only; never blocks or closes.
 - **Assignee**: Person assigned to a task (can have GitHub username)
 - **External Ref**: Link to GitHub issues/PRs or URLs
 
@@ -306,8 +323,11 @@ pub fn execute(force_init: bool, no_hooks: bool) -> Result<()> {
     let agents_md_path = cwd.join("AGENTS.md");
 
     // The db file — not the dir — determines whether we're initialized. A dir
-    // that exists without the db (interrupted init, deleted db) still needs work.
-    let db_exists = mycelium_dir.join("mycelium.db").exists();
+    // that exists without the db (interrupted init, deleted db) still needs
+    // work. Check via the ancestor walk so `myc init` from a subdir of an
+    // existing project reports "already initialized" instead of nesting a
+    // second .mycelium/ under the subdir.
+    let db_exists = crate::commands::get_db_path().exists();
     if db_exists && !force_init {
         println!(
             "{} Mycelium project already initialized",
@@ -373,11 +393,19 @@ fn install_hook_if_wanted(no_hooks: bool) {
 }
 
 pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let mycelium_dir = cwd.join(".mycelium");
+    // Resolve the real project via the same ancestor walk every other command
+    // uses, so `myc prime-agents` from a subdir targets the repo's AGENTS.md
+    // (and .mycelium/), not a phantom one in the cwd. get_mycelium_dir() falls
+    // back to cwd/.mycelium when no ancestor project exists, preserving the
+    // "prime-agents in a fresh dir creates it here" behavior.
+    let mycelium_dir = crate::commands::get_mycelium_dir();
+    let project_root = mycelium_dir
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
     let agents_md_path = path
-        .map(|p| cwd.join(p))
-        .unwrap_or_else(|| cwd.join("AGENTS.md"));
+        .map(|p| project_root.join(p))
+        .unwrap_or_else(|| project_root.join("AGENTS.md"));
 
     ensure_project_initialized(&mycelium_dir)?;
 
@@ -416,12 +444,20 @@ pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-/// True when `AGENTS.md` in cwd has a mycelium marker block whose embedded
-/// version differs from this binary's `AGENTS_MD_VERSION`. False when the file
-/// is missing, has no marker, or is already current — the auto-refresh only
-/// acts on a present-but-outdated block (never creates AGENTS.md unprompted).
+/// True when the project's `AGENTS.md` has a mycelium marker block whose
+/// embedded version differs from this binary's `AGENTS_MD_VERSION`. False when
+/// the file is missing, has no marker, or is already current — the auto-refresh
+/// only acts on a present-but-outdated block (never creates AGENTS.md
+/// unprompted). Resolves AGENTS.md against the real project root (ancestor
+/// walk), so it works from any subdirectory — matching maybe_refresh's own
+/// project detection.
 pub fn is_agents_block_stale() -> bool {
-    let Ok(content) = fs::read_to_string("AGENTS.md") else {
+    let project_root = crate::commands::get_mycelium_dir();
+    let agents_md_path = match project_root.parent() {
+        Some(root) => root.join("AGENTS.md"),
+        None => return false,
+    };
+    let Ok(content) = fs::read_to_string(&agents_md_path) else {
         return false;
     };
     matches!(find_marker_block(&content), Some((_, _, ver)) if ver != Some(AGENTS_MD_VERSION))

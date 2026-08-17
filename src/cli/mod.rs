@@ -388,6 +388,10 @@ pub enum TaskCommands {
         #[arg(short, long, value_parser = id_parser::epic_id)]
         epic: Option<i64>,
 
+        /// Parent task ID (makes this a subtask/child of that task)
+        #[arg(long, value_parser = id_parser::task_id)]
+        parent: Option<i64>,
+
         /// Priority (low, medium, high, critical)
         #[arg(short, long, default_value = "medium")]
         priority: String,
@@ -450,6 +454,12 @@ pub enum TaskCommands {
         /// Show all tasks including closed (overrides default open filter)
         #[arg(long)]
         all: bool,
+
+        /// Render as a parent>child tree. A child that matches the filters is
+        /// shown nested under its parent even when the parent itself does not
+        /// match (parent shown as dimmed context, not as an orphan).
+        #[arg(long)]
+        tree: bool,
     },
 
     /// Batch create tasks from JSON file
@@ -491,6 +501,10 @@ pub enum TaskCommands {
         /// New epic ID (use 0 to remove)
         #[arg(short, long, value_parser = id_parser::epic_id)]
         epic: Option<i64>,
+
+        /// New parent task ID (use 0 to detach / make top-level)
+        #[arg(long, value_parser = id_parser::task_id)]
+        parent: Option<i64>,
 
         /// New assignee ID (use 0 to remove)
         #[arg(short, long, value_parser = id_parser::assignee_id)]
@@ -550,6 +564,28 @@ pub enum TaskCommands {
         ref_id: i64,
     },
 
+    /// Show non-blocking references (relates/duplicate) for a task
+    Refs {
+        /// Task ID
+        #[arg(value_parser = id_parser::task_id)]
+        id: i64,
+    },
+
+    /// Remove a non-blocking reference between two tasks
+    RefUnlink {
+        /// First task ID
+        #[arg(value_parser = id_parser::task_id)]
+        task: i64,
+
+        /// Second task ID
+        #[arg(value_parser = id_parser::task_id)]
+        other: i64,
+
+        /// Reference type to remove (relates or duplicate)
+        #[arg(value_parser = ["relates", "duplicate"])]
+        ref_type: String,
+    },
+
     /// Close a task
     Close {
         /// Task ID
@@ -559,6 +595,11 @@ pub enum TaskCommands {
         /// Force close even if blocked
         #[arg(long)]
         force: bool,
+
+        /// Also close all open child subtasks (default: prompt when the task
+        /// has open children; children are never closed without this or a yes)
+        #[arg(long)]
+        cascade: bool,
     },
 
     /// Reopen a task
@@ -685,6 +726,29 @@ pub enum LinkCommands {
         #[arg(value_parser = id_parser::task_id)]
         blocked: i64,
     },
+
+    /// Mark two tasks as related (non-blocking, symmetric)
+    Relates {
+        /// First task ID
+        #[arg(value_parser = id_parser::task_id)]
+        task: i64,
+
+        /// Second task ID
+        #[arg(value_parser = id_parser::task_id)]
+        other: i64,
+    },
+
+    /// Mark two tasks as duplicates (non-blocking, symmetric; marks only,
+    /// never closes or merges anything)
+    Duplicate {
+        /// First task ID
+        #[arg(value_parser = id_parser::task_id)]
+        task: i64,
+
+        /// Second task ID
+        #[arg(value_parser = id_parser::task_id)]
+        other: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -780,6 +844,10 @@ pub struct ListArgs {
     /// Show all tasks including closed (overrides default open filter)
     #[arg(long)]
     pub all: bool,
+
+    /// Render as a parent>child tree (see `myc task list --tree`)
+    #[arg(long)]
+    pub tree: bool,
 }
 
 #[derive(Subcommand)]
