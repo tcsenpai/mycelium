@@ -12,10 +12,12 @@ use comfy_table::{ContentArrangement, Table};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 
+#[allow(clippy::too_many_arguments)]
 pub fn create(
     title: &str,
     description: Option<&str>,
     epic_id: Option<i64>,
+    parent_id: Option<i64>,
     priority: &str,
     assignee_id: Option<i64>,
     due: Option<&str>,
@@ -44,7 +46,7 @@ pub fn create(
 
     let priority_enum: Priority = final_priority.parse()?;
 
-    let task = db.create_task(
+    let mut task = db.create_task(
         title,
         description,
         epic_id,
@@ -55,6 +57,18 @@ pub fn create(
         notes,
         user_info,
     )?;
+
+    // Attach to a parent if requested. Done as a follow-up call (rather than a
+    // create_task arg) so the validated set_parent guard (existence, no self,
+    // no cycle) is the single source of truth. A create with a bad --parent
+    // leaves the task created but top-level, and surfaces the error.
+    if let Some(pid) = parent_id {
+        db.set_parent(task.id, Some(pid))?;
+        // Re-read so JSON/quiet output reflects the parent_id.
+        if let Some(updated) = db.get_task(task.id)? {
+            task = updated;
+        }
+    }
 
     if quiet {
         println!("{}", task.id);
@@ -75,6 +89,7 @@ pub fn create(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn list(
     epic_id: Option<i64>,
     status: Option<&str>,
@@ -84,6 +99,7 @@ pub fn list(
     overdue: bool,
     tag: Option<&str>,
     all: bool,
+    tree: bool,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
@@ -119,6 +135,8 @@ pub fn list(
     }
 
     match format {
+        // JSON already carries parent_id on every task, so a consumer can build
+        // the tree itself — --tree changes only the human table rendering.
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&tasks)?),
         OutputFormat::Table => {
             if tasks.is_empty() {
@@ -134,6 +152,11 @@ pub fn list(
             // Fetch all epics for lookup
             let epics = db.list_epics()?;
             let epic_map: HashMap<i64, Epic> = epics.into_iter().map(|e| (e.id, e)).collect();
+
+            if tree {
+                print_parent_tree(&tasks, &db)?;
+                return Ok(());
+            }
 
             // Fetch all dependencies for the tasks we're showing
             let task_ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
@@ -153,6 +176,111 @@ pub fn list(
             }
         }
     }
+    Ok(())
+}
+
+/// Render matched tasks as a parent>child hierarchy.
+///
+/// Two of the peer's constraints shape this:
+/// 1. Filter must not orphan a matched child: if a child matched but its parent
+///    did not, the parent is still shown as CONTEXT (dimmed, marked "· context")
+///    so the child renders nested rather than floating at the root.
+/// 2. Counting must not mislead: a parent line shows "(+N subtasks)" from the
+///    matched set, and context parents are not counted as matches themselves.
+fn print_parent_tree(tasks: &[crate::models::Task], db: &crate::db::Database) -> Result<()> {
+    use std::collections::{HashMap, HashSet};
+
+    let matched: HashSet<i64> = tasks.iter().map(|t| t.id).collect();
+    let by_id: HashMap<i64, &crate::models::Task> = tasks.iter().map(|t| (t.id, t)).collect();
+
+    // Resolve context parents: a matched task whose parent is NOT in the set.
+    // Fetch those parent rows so we can show them as context.
+    let mut context_parents: HashMap<i64, crate::models::Task> = HashMap::new();
+    for t in tasks {
+        if let Some(pid) = t.parent_id {
+            if !matched.contains(&pid) && !context_parents.contains_key(&pid) {
+                if let Some(parent) = db.get_task(pid)? {
+                    context_parents.insert(pid, parent);
+                }
+            }
+        }
+    }
+
+    // Roots to print at the top level: matched tasks with no parent, matched
+    // tasks whose parent is also unmatched-and-not-context (defensive), and the
+    // context parents themselves.
+    let mut children_of: HashMap<i64, Vec<i64>> = HashMap::new();
+    for t in tasks {
+        if let Some(pid) = t.parent_id {
+            if matched.contains(&pid) || context_parents.contains_key(&pid) {
+                children_of.entry(pid).or_default().push(t.id);
+            }
+        }
+    }
+
+    // Print helper (recursive over the matched/context maps).
+    fn line(
+        id: i64,
+        depth: usize,
+        is_context: bool,
+        by_id: &HashMap<i64, &crate::models::Task>,
+        context_parents: &HashMap<i64, crate::models::Task>,
+        children_of: &HashMap<i64, Vec<i64>>,
+    ) {
+        let indent = "  ".repeat(depth);
+        let child_count = children_of.get(&id).map(|v| v.len()).unwrap_or(0);
+        let suffix = if child_count > 0 {
+            format!(" (+{child_count} subtask(s))")
+        } else {
+            String::new()
+        };
+        let (status, priority, title) = if is_context {
+            let t = &context_parents[&id];
+            (t.status, t.priority, t.title.clone())
+        } else {
+            let t = by_id[&id];
+            (t.status, t.priority, t.title.clone())
+        };
+        let marker = if is_context {
+            " · context".dimmed()
+        } else {
+            "".normal()
+        };
+        println!(
+            "{}{} {} {}: {}{}{}",
+            indent,
+            status.emoji(),
+            priority.emoji(),
+            tid(id).cyan(),
+            title,
+            suffix,
+            marker
+        );
+        if let Some(kids) = children_of.get(&id) {
+            for &kid in kids {
+                line(kid, depth + 1, false, by_id, context_parents, children_of);
+            }
+        }
+    }
+
+    // Top-level order: context parents first (they head their subtrees), then
+    // matched roots (no parent, or parent not in view at all).
+    let mut printed: HashSet<i64> = HashSet::new();
+    for (&cid, _) in context_parents.iter() {
+        line(cid, 0, true, &by_id, &context_parents, &children_of);
+        printed.insert(cid);
+    }
+    for t in tasks {
+        let is_root = match t.parent_id {
+            None => true,
+            Some(pid) => !matched.contains(&pid) && !context_parents.contains_key(&pid),
+        };
+        if is_root && !printed.contains(&t.id) {
+            line(t.id, 0, false, &by_id, &context_parents, &children_of);
+            printed.insert(t.id);
+        }
+    }
+    println!("\n{} matching task(s).", matched.len());
     Ok(())
 }
 
@@ -638,6 +766,7 @@ pub fn show(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     id: i64,
     title: Option<&str>,
@@ -645,6 +774,7 @@ pub fn update(
     status: Option<&str>,
     priority: Option<&str>,
     epic_id: Option<i64>,
+    parent_id: Option<i64>,
     assignee_id: Option<i64>,
     due: Option<&str>,
     tags: Option<&str>,
@@ -671,7 +801,7 @@ pub fn update(
     let user_info_opt = user_info.map(|u| if u == "-" { None } else { Some(u) });
     let agent_questions_opt = agent_questions.map(|q| if q == "-" { None } else { Some(q) });
 
-    let task = db.update_task(
+    let mut task = db.update_task(
         id,
         title,
         description,
@@ -685,6 +815,16 @@ pub fn update(
         user_info_opt,
         agent_questions_opt,
     )?;
+
+    // Parent re-assignment (0 = detach). Applied through set_parent so the
+    // cycle/self/existence guard runs; only when --parent was actually passed.
+    if let Some(p) = parent_id {
+        let new_parent = if p == 0 { None } else { Some(p) };
+        db.set_parent(id, new_parent)?;
+        if let Some(updated) = db.get_task(id)? {
+            task = updated;
+        }
+    }
 
     if quiet {
         println!("{}", task.id);
@@ -870,7 +1010,7 @@ pub fn unlink_ref(ref_id: i64, quiet: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
+pub fn close(id: i64, force: bool, cascade: bool, quiet: bool) -> Result<()> {
     let mut db = ensure_initialized()?;
 
     let _task = db
@@ -896,6 +1036,30 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
         return Ok(());
     }
 
+    // Subtask handling: closing a parent never auto-closes its children. If
+    // there are open children, decide whether to cascade:
+    //   --cascade         -> close them all, no prompt
+    //   interactive       -> prompt once; yes cascades, no closes only parent
+    //   quiet (scripted)  -> close only the parent (no prompt possible)
+    let open_children = db.get_open_children(id)?;
+    let mut close_children = cascade;
+    if !open_children.is_empty() && !cascade {
+        if quiet {
+            // Non-interactive: leave children open (safe default), parent closes.
+        } else {
+            println!(
+                "{} Task {} has {} open subtask(s):",
+                INFO_PREFIX,
+                tid(id),
+                open_children.len()
+            );
+            for c in &open_children {
+                println!("  - {}: {}", tid(c.id), c.title);
+            }
+            close_children = confirm("Also close these subtasks?");
+        }
+    }
+
     let updated = db.update_task_forced(
         id,
         None,
@@ -911,6 +1075,41 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
         None,
     )?;
 
+    let mut closed_children = 0usize;
+    if close_children {
+        for c in &open_children {
+            // Force past each child's own blockers: the user opted into closing
+            // the whole subtree. A child that fails to close is reported, not
+            // fatal.
+            match db.update_task_forced(
+                c.id,
+                None,
+                None,
+                Some(Status::Closed),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ) {
+                Ok(_) => closed_children += 1,
+                Err(e) => {
+                    if !quiet {
+                        println!(
+                            "{} Could not close subtask {}: {}",
+                            ERROR_PREFIX.red(),
+                            tid(c.id),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     if !quiet {
         println!(
             "{} Closed task {}: {}",
@@ -918,7 +1117,94 @@ pub fn close(id: i64, force: bool, quiet: bool) -> Result<()> {
             tid(id),
             updated.title
         );
+        if closed_children > 0 {
+            println!("  (also closed {closed_children} subtask(s))");
+        } else if !open_children.is_empty() && !close_children {
+            println!("  ({} subtask(s) left open)", open_children.len());
+        }
         crate::commands::followup::print_close_hint();
+    }
+    Ok(())
+}
+
+/// Add a non-blocking reference (relates/duplicate) between two tasks. Marks
+/// only — never closes or merges. Symmetric: the stored row is direction-free.
+pub fn link_ref(task_id: i64, other_id: i64, ref_type: &str, quiet: bool) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    let rt: crate::models::TaskRefType = ref_type.parse()?;
+    db.add_task_ref(task_id, other_id, rt)?;
+    if !quiet {
+        println!(
+            "{} Marked task {} and task {} as {} {}",
+            SUCCESS_PREFIX.green(),
+            tid(task_id),
+            tid(other_id),
+            rt,
+            rt.emoji()
+        );
+    }
+    Ok(())
+}
+
+/// Remove a non-blocking reference between two tasks (either direction).
+pub fn ref_unlink(task_id: i64, other_id: i64, ref_type: &str, quiet: bool) -> Result<()> {
+    let mut db = ensure_initialized()?;
+    let rt: crate::models::TaskRefType = ref_type.parse()?;
+    let n = db.remove_task_ref(task_id, other_id, rt)?;
+    if !quiet {
+        if n > 0 {
+            println!(
+                "{} Removed {} reference between task {} and task {}",
+                SUCCESS_PREFIX.green(),
+                rt,
+                tid(task_id),
+                tid(other_id)
+            );
+        } else {
+            println!(
+                "{} No {} reference between task {} and task {}",
+                INFO_PREFIX,
+                rt,
+                tid(task_id),
+                tid(other_id)
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Show the non-blocking references (relates/duplicate) touching a task.
+pub fn refs(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let db = ensure_initialized()?;
+    db.get_task(id)?
+        .ok_or_else(|| crate::error::MyceliumError::NotFound {
+            entity: "task".to_string(),
+            id: id.to_string(),
+        })?;
+    let refs = db.get_task_refs(id)?;
+
+    match format {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&refs)?),
+        OutputFormat::Table => {
+            if quiet {
+                for r in &refs {
+                    println!("{}\t{}\t{}", r.ref_type, tid(r.other_id), r.title);
+                }
+            } else if refs.is_empty() {
+                println!("{} Task {} has no references.", INFO_PREFIX, tid(id));
+            } else {
+                println!("References for task {}:", tid(id));
+                for r in &refs {
+                    println!(
+                        "  {} {} {}: {}",
+                        r.ref_type.emoji(),
+                        r.ref_type,
+                        tid(r.other_id).cyan(),
+                        r.title
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }
