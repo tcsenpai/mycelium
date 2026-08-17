@@ -489,8 +489,11 @@ fn print_grouped_view(tasks: &[crate::models::Task], epic_map: &HashMap<i64, Epi
                     .tags
                     .as_ref()
                     .map(|t| {
-                        if t.len() > 15 {
-                            format!("{}...", &t[..15])
+                        // Truncate on char boundaries, not raw bytes: byte-slicing
+                        // &t[..15] panics when a multi-byte UTF-8 char straddles
+                        // offset 15 (accented tags, emoji). Tags are free-form input.
+                        if t.chars().count() > 15 {
+                            format!("{}...", t.chars().take(15).collect::<String>())
                         } else {
                             t.clone()
                         }

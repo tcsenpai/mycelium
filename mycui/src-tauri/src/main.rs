@@ -815,7 +815,9 @@ async fn remove_dependency(
     depends_on: i64,
 ) -> Result<(), String> {
     let mut db = state.db.lock().await;
-    db.remove_dependency(task_id, depends_on).map_err(|e| e.to_string())
+    db.remove_dependency(task_id, depends_on)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

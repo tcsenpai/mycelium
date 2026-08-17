@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "mycelium-manager"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1059,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "mycelium-manager-core"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "chrono",
  "regex",

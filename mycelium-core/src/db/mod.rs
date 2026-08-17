@@ -280,42 +280,48 @@ impl Database {
     ) -> Result<Epic> {
         let now = chrono::Local::now().to_rfc3339();
 
+        // All-or-nothing: a failure mid-sequence (SQLITE_BUSY, I/O error) would
+        // otherwise leave earlier fields committed and later ones not, giving
+        // the caller an Err while a partial write persists. Mirrors
+        // update_task_inner.
+        let tx = self.conn.transaction()?;
         if let Some(title) = title {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE epics SET title = ?1, updated_at = ?2 WHERE id = ?3",
                 (title, &now, id),
             )?;
         }
         if let Some(description) = description {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE epics SET description = ?1, updated_at = ?2 WHERE id = ?3",
                 (description, &now, id),
             )?;
         }
         if let Some(status) = status {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE epics SET status = ?1, updated_at = ?2 WHERE id = ?3",
                 (status.to_string(), &now, id),
             )?;
         }
         if let Some(notes) = notes {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE epics SET notes = ?1, updated_at = ?2 WHERE id = ?3",
                 (notes, &now, id),
             )?;
         }
         if let Some(user_info) = user_info {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE epics SET user_info = ?1, updated_at = ?2 WHERE id = ?3",
                 (user_info, &now, id),
             )?;
         }
         if let Some(agent_questions) = agent_questions {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE epics SET agent_questions = ?1, updated_at = ?2 WHERE id = ?3",
                 (agent_questions, &now, id),
             )?;
         }
+        tx.commit()?;
 
         self.get_epic(id).map(|e| {
             e.ok_or_else(|| MyceliumError::NotFound {
@@ -862,12 +868,14 @@ impl Database {
         }
     }
 
-    pub fn remove_dependency(&mut self, task_id: i64, depends_on_task_id: i64) -> Result<()> {
-        self.conn.execute(
+    /// Returns the number of dependency rows deleted (0 if none matched), so
+    /// callers can distinguish "unlinked" from "there was nothing to unlink".
+    pub fn remove_dependency(&mut self, task_id: i64, depends_on_task_id: i64) -> Result<usize> {
+        let affected = self.conn.execute(
             "DELETE FROM dependencies WHERE task_id = ?1 AND depends_on_task_id = ?2",
             (task_id, depends_on_task_id),
         )?;
-        Ok(())
+        Ok(affected)
     }
 
     pub fn get_blocking_tasks(&self, task_id: i64) -> Result<Vec<i64>> {

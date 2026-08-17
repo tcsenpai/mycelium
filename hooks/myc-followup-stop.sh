@@ -30,8 +30,12 @@ marker="${TMPDIR:-/tmp}/.myc-fu-stop-${dedup_hash}"
 if [ -f "$marker" ]; then
   # Fresh marker (<10s) means a sibling copy already handled this stop.
   now=$(date +%s)
-  mtime=$(stat -f %m "$marker" 2>/dev/null || stat -c %Y "$marker" 2>/dev/null || echo 0)
-  if [ $((now - mtime)) -lt 10 ]; then
+  # On a platform where neither stat form works, mtime is empty; treat that as
+  # "fresh" so we dedup (a marker file only exists if a sibling just ran). The
+  # opposite default (mtime=0 -> now-0 huge -> never dedup) made both the global
+  # and project-local hooks fire the FOLLOW-UP CHECK on every stop.
+  mtime=$(stat -f %m "$marker" 2>/dev/null || stat -c %Y "$marker" 2>/dev/null)
+  if [ -z "$mtime" ] || [ $((now - mtime)) -lt 10 ]; then
     exit 0
   fi
 fi
