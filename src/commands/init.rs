@@ -1,4 +1,4 @@
-use crate::commands::{INFO_PREFIX, SUCCESS_PREFIX};
+use crate::commands::{confirm_default_yes, INFO_PREFIX, SUCCESS_PREFIX, WARNING_PREFIX};
 use crate::db::Database;
 use crate::error::Result;
 use colored::Colorize;
@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 9;
+const AGENTS_MD_VERSION: u32 = 10;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -19,7 +19,11 @@ This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for t
 ### Quick Reference
 
 ```bash
-# Initialize mycelium in this project (creates .mycelium/ directory)
+# Initialize mycelium in this project (creates .mycelium/ directory).
+# Commands resolve the nearest .mycelium/ by walking UP from the cwd, so run
+# them from anywhere in the project. Running `myc init` inside a subdir of an
+# existing project warns and asks (default yes) before creating a SEPARATE
+# nested project there; `myc init --force` creates it without asking.
 myc init
 
 # Create an epic (a large body of work)
@@ -131,6 +135,7 @@ check automatically. Commit `.claude/` so the whole team gets it.
 
 ```bash
 myc init --no-hooks          # skip the hook install
+myc init --force             # create a nested project in a subdir without asking
 myc hooks install            # (re)install into the project's .claude/
 myc hooks install --global   # install into ~/.claude instead
 myc hooks uninstall          # remove (add --global for ~/.claude)
@@ -322,21 +327,51 @@ pub fn execute(force_init: bool, no_hooks: bool) -> Result<()> {
     let mycelium_dir = cwd.join(".mycelium");
     let agents_md_path = cwd.join("AGENTS.md");
 
-    // The db file — not the dir — determines whether we're initialized. A dir
-    // that exists without the db (interrupted init, deleted db) still needs
-    // work. Check via the ancestor walk so `myc init` from a subdir of an
-    // existing project reports "already initialized" instead of nesting a
-    // second .mycelium/ under the subdir.
-    let db_exists = crate::commands::get_db_path().exists();
-    if db_exists && !force_init {
+    // Two distinct "already there" cases, resolved separately:
+    //   (a) THIS dir is already a project (cwd/.mycelium/mycelium.db exists) —
+    //       nothing to do, don't re-init over yourself.
+    //   (b) an ANCESTOR dir is a project (the walk finds a db higher up) but the
+    //       cwd is not — running `init` here means the user wants a project HERE.
+    //       We used to silently return "already initialized" (no-nesting), which
+    //       left the user in a subdir with no local .mycelium/ and no explanation.
+    //       Now we WARN with the ancestor path and ask (default yes) before
+    //       creating a nested local project.
+    let local_db = cwd.join(".mycelium").join("mycelium.db");
+    if local_db.exists() && !force_init {
         println!(
-            "{} Mycelium project already initialized",
-            INFO_PREFIX.blue()
+            "{} Mycelium project already initialized here ({})",
+            INFO_PREFIX.blue(),
+            display_path(&mycelium_dir)
         );
-        // Still (re)install the hook — idempotent, and covers repos initialized
-        // before the hook existed.
         install_hook_if_wanted(no_hooks);
         return Ok(());
+    }
+
+    if !local_db.exists() && !force_init {
+        let ancestor_db = crate::commands::get_db_path();
+        if ancestor_db.exists() {
+            // ancestor_db is guaranteed NOT in cwd here (local_db doesn't exist).
+            let ancestor_dir = ancestor_db
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| ancestor_db.clone());
+            println!(
+                "{} A Mycelium project already exists in a parent directory ({}).",
+                WARNING_PREFIX.yellow(),
+                display_path(&ancestor_dir)
+            );
+            // Default YES: creating a local project here is the natural intent of
+            // running `init` in this dir. Non-interactive (no TTY / scripted)
+            // proceeds with the default rather than blocking.
+            if !confirm_default_yes("Create a separate Mycelium project in the current directory?")
+            {
+                println!(
+                    "{} Aborted — using the parent project. Run commands from here; they resolve upward.",
+                    INFO_PREFIX.blue()
+                );
+                return Ok(());
+            }
+        }
     }
 
     ensure_project_initialized(&mycelium_dir)?;
@@ -409,14 +444,22 @@ pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
 
     ensure_project_initialized(&mycelium_dir)?;
 
+    // AGENTS.md is resolved against the PROJECT ROOT (parent of the ancestor
+    // .mycelium/), which is intentional — one AGENTS.md per project, not one
+    // per subdir. But when the command runs from a subdir, "wrote AGENTS.md"
+    // with no path is misleading (looks like it landed in the cwd). Always show
+    // the resolved path so a subdir caller isn't left hunting a phantom file.
+    let shown_path = display_path(&agents_md_path);
+
     if !agents_md_path.exists() {
         fs::write(
             &agents_md_path,
             format!("# Agent Instructions\n{}", marker_block()),
         )?;
         println!(
-            "{} Created AGENTS.md with mycelium instructions (v{})",
+            "{} Created {} with mycelium instructions (v{})",
             SUCCESS_PREFIX.green(),
+            shown_path,
             AGENTS_MD_VERSION
         );
         return Ok(());
@@ -427,21 +470,41 @@ pub fn execute_prime_agents(force: bool, path: Option<&Path>) -> Result<()> {
         Some((updated, action)) => {
             fs::write(&agents_md_path, updated)?;
             println!(
-                "{} {} AGENTS.md mycelium block (v{})",
+                "{} {} mycelium block in {} (v{})",
                 SUCCESS_PREFIX.green(),
                 action,
+                shown_path,
                 AGENTS_MD_VERSION
             );
         }
         None => {
             println!(
-                "{} AGENTS.md mycelium block already at v{} — no change (use --force to regenerate)",
-                INFO_PREFIX.blue(), AGENTS_MD_VERSION
+                "{} {} mycelium block already at v{} — no change (use --force to regenerate)",
+                INFO_PREFIX.blue(),
+                shown_path,
+                AGENTS_MD_VERSION
             );
         }
     }
 
     Ok(())
+}
+
+/// Render a path for user output: absolute if we can canonicalize it (so a
+/// subdir caller sees WHERE the project-root AGENTS.md actually is), otherwise
+/// the path as-is. Canonicalize can fail on a not-yet-created file, so fall
+/// back to the parent dir + filename when possible.
+fn display_path(p: &Path) -> String {
+    if let Ok(abs) = p.canonicalize() {
+        return abs.display().to_string();
+    }
+    // File may not exist yet (create path): canonicalize the parent instead.
+    if let (Some(parent), Some(name)) = (p.parent(), p.file_name()) {
+        if let Ok(abs_parent) = parent.canonicalize() {
+            return abs_parent.join(name).display().to_string();
+        }
+    }
+    p.display().to_string()
 }
 
 /// True when the project's `AGENTS.md` has a mycelium marker block whose
@@ -670,6 +733,40 @@ mod tests {
         // Second call is a no-op now that the db exists.
         let created_again = ensure_project_initialized(&mycelium_dir).unwrap();
         assert!(!created_again, "should be idempotent once db exists");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn display_path_is_absolute_for_existing_and_new_files() {
+        // Regression: `prime-agents` from a subdir writes AGENTS.md at the
+        // PROJECT ROOT (ancestor of .mycelium/), and the old message showed a
+        // bare "AGENTS.md" with no path — so a subdir caller ran `ls AGENTS.md`
+        // in the cwd, found nothing, and thought the command lied. display_path
+        // must yield an ABSOLUTE path in both cases (file exists, and file to be
+        // created) so the message tells the caller where it actually landed.
+        let tmp = std::env::temp_dir().join(format!("myc-disp-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // Existing file.
+        let existing = tmp.join("AGENTS.md");
+        fs::write(&existing, "x").unwrap();
+        let shown = display_path(&existing);
+        assert!(
+            Path::new(&shown).is_absolute(),
+            "existing-file path must be absolute, got {shown}"
+        );
+
+        // Not-yet-created file (the create branch): parent exists, file doesn't.
+        let to_create = tmp.join("NEW_AGENTS.md");
+        assert!(!to_create.exists());
+        let shown_new = display_path(&to_create);
+        assert!(
+            Path::new(&shown_new).is_absolute(),
+            "new-file path must be absolute, got {shown_new}"
+        );
+        assert!(shown_new.ends_with("NEW_AGENTS.md"));
 
         let _ = fs::remove_dir_all(&tmp);
     }

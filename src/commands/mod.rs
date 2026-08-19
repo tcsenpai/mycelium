@@ -108,3 +108,48 @@ pub fn confirm(prompt: &str) -> bool {
 
     matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
 }
+
+/// Like `confirm`, but the default is YES: an empty answer (bare Enter) means
+/// yes, and a NON-interactive caller (no TTY — scripted/piped, e.g. an agent
+/// running `myc`) proceeds with the default instead of blocking on a read that
+/// never returns input. Only an explicit "n"/"no" declines.
+pub fn confirm_default_yes(prompt: &str) -> bool {
+    use std::io::IsTerminal;
+    // No TTY on stdin → can't prompt; take the default (yes).
+    if !std::io::stdin().is_terminal() {
+        return true;
+    }
+    print!("{} {} [Y/n] ", WARNING_PREFIX.yellow(), prompt);
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap_or(0);
+
+    affirmative_default_yes(&input)
+}
+
+/// Parse a yes/no answer where the default (empty input) is YES. Only an
+/// explicit "n"/"no" (any case, surrounding whitespace ok) declines.
+fn affirmative_default_yes(input: &str) -> bool {
+    !matches!(input.trim().to_lowercase().as_str(), "n" | "no")
+}
+
+#[cfg(test)]
+mod confirm_tests {
+    use super::*;
+
+    #[test]
+    fn default_yes_treats_empty_and_yes_as_affirmative() {
+        for s in ["", "\n", "  \n", "y", "Y", "yes", "YES", "sure", "whatever"] {
+            assert!(affirmative_default_yes(s), "{s:?} should be yes-by-default");
+        }
+    }
+
+    #[test]
+    fn default_yes_only_n_and_no_decline() {
+        for s in ["n", "N", "no", "NO", " no \n"] {
+            assert!(!affirmative_default_yes(s), "{s:?} should decline");
+        }
+    }
+}
