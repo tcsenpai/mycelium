@@ -26,6 +26,11 @@ pub enum Commands {
         /// Skip installing the follow-up Stop hook into .claude/
         #[arg(long)]
         no_hooks: bool,
+
+        /// Create a project here without prompting, even if a parent directory
+        /// already has one (skips the nested-project confirmation).
+        #[arg(long)]
+        force: bool,
     },
 
     /// Generate or update AGENTS.md with mycelium instructions

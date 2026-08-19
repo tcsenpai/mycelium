@@ -40,7 +40,7 @@ fn main() {
     commands::autorefresh::maybe_refresh(&cli.command);
 
     let result = match cli.command {
-        Commands::Init { no_hooks } => commands::init::execute(false, no_hooks),
+        Commands::Init { no_hooks, force } => commands::init::execute(force, no_hooks),
 
         Commands::PrimeAgents { force, path } => {
             commands::init::execute_prime_agents(force, path.as_deref())
