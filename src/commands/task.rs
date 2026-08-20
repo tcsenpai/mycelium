@@ -100,6 +100,7 @@ pub fn list(
     tag: Option<&str>,
     all: bool,
     tree: bool,
+    parent_id: Option<i64>,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
@@ -125,6 +126,7 @@ pub fn list(
         blocked,
         overdue,
         tag,
+        parent_id,
     )?;
 
     if quiet {

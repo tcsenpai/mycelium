@@ -141,6 +141,7 @@ fn main() {
                 tag,
                 all,
                 tree,
+                parent,
             } => commands::task::list(
                 epic,
                 status.as_deref(),
@@ -151,6 +152,7 @@ fn main() {
                 tag.as_deref(),
                 all,
                 tree,
+                parent,
                 &cli.format,
                 cli.quiet,
             ),
@@ -283,6 +285,7 @@ fn main() {
             args.tag.as_deref(),
             args.all,
             args.tree,
+            args.parent,
             &cli.format,
             cli.quiet,
         ),

@@ -500,6 +500,7 @@ async fn get_tasks(
             false,
             filters.overdue,
             filters.tag.as_deref(),
+            None,
         )
         .map_err(|e| e.to_string())?;
 
@@ -898,7 +899,7 @@ async fn search_tasks(
 ) -> Result<Vec<Task>, String> {
     let db = state.db.lock().await;
     let tasks = db
-        .list_tasks(None, None, None, None, false, false, None)
+        .list_tasks(None, None, None, None, false, false, None, None)
         .map_err(|e| e.to_string())?;
     let mut dtos = build_task_dtos(&db, tasks)?;
 
