@@ -21,7 +21,7 @@ Hindsight bank named in `.bank` (do not edit by hand).
   `~/.claude/hindsight-memory.enabled`.
 <!-- hindsight-memory:end -->
 
-<!-- myc:agents-start v=9 -->
+<!-- myc:agents-start v=12 -->
 ## Project Management with Mycelium
 
 This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
@@ -29,7 +29,11 @@ This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for t
 ### Quick Reference
 
 ```bash
-# Initialize mycelium in this project (creates .mycelium/ directory)
+# Initialize mycelium in this project (creates .mycelium/ directory).
+# Commands resolve the nearest .mycelium/ by walking UP from the cwd, so run
+# them from anywhere in the project. Running `myc init` inside a subdir of an
+# existing project warns and asks (default yes) before creating a SEPARATE
+# nested project there; `myc init --force` creates it without asking.
 myc init
 
 # Create an epic (a large body of work)
@@ -52,6 +56,15 @@ myc task list --overdue
 myc task list --blocked
 myc task list --all          # include closed tasks
 myc task list --tree         # parent > child hierarchy
+myc task list --parent 5     # flat list of the direct children of task 5
+myc task list --parent 0     # only top-level tasks (no parent)
+myc task list --parent 5 --tag sp   # children of 5 filtered by tag (combinable)
+
+# Find a task id from a title/description fragment (searches both, case-insensitive).
+# Quiet mode is grep-friendly: "<id>\t<title>" per line. JSON gives full objects.
+myc task search "custom_field"
+myc -q task search "subquery"        # id + title, tab-separated
+myc --format json task search "SP"   # full task objects
 
 # Subtasks (parent/child hierarchy — distinct from epics and dependencies).
 # Group a family of tasks under a "hat" task without inventing an epic.
@@ -141,6 +154,7 @@ check automatically. Commit `.claude/` so the whole team gets it.
 
 ```bash
 myc init --no-hooks          # skip the hook install
+myc init --force             # create a nested project in a subdir without asking
 myc hooks install            # (re)install into the project's .claude/
 myc hooks install --global   # install into ~/.claude instead
 myc hooks uninstall          # remove (add --global for ~/.claude)
