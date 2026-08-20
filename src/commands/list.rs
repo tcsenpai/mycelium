@@ -12,6 +12,7 @@ pub fn execute(
     tag: Option<&str>,
     all: bool,
     tree: bool,
+    parent: Option<i64>,
     format: &OutputFormat,
     quiet: bool,
 ) -> Result<()> {
@@ -26,6 +27,7 @@ pub fn execute(
         tag,
         all,
         tree,
+        parent,
         format,
         quiet,
     )

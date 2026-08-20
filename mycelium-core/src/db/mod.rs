@@ -432,6 +432,7 @@ impl Database {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn list_tasks(
         &self,
         epic_id: Option<i64>,
@@ -441,6 +442,7 @@ impl Database {
         blocked_only: bool,
         overdue_only: bool,
         tag: Option<&str>,
+        parent_id: Option<i64>,
     ) -> Result<Vec<Task>> {
         let mut conditions = vec!["1=1"];
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
@@ -448,6 +450,16 @@ impl Database {
         if let Some(eid) = epic_id {
             conditions.push("epic_id = ?");
             params.push(Box::new(eid));
+        }
+        // Filter to direct children of a task. `--parent 0` (or any <= 0) means
+        // "top-level only" (no parent) so callers can list family heads.
+        if let Some(pid) = parent_id {
+            if pid <= 0 {
+                conditions.push("parent_id IS NULL");
+            } else {
+                conditions.push("parent_id = ?");
+                params.push(Box::new(pid));
+            }
         }
         if let Some(s) = status {
             conditions.push("status = ?");

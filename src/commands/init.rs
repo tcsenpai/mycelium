@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Bump this whenever AGENTS_MD_CONTENT changes. `myc prime-agents`
 /// without --force only updates when the embedded marker version differs.
-const AGENTS_MD_VERSION: u32 = 10;
+const AGENTS_MD_VERSION: u32 = 11;
 const AGENTS_MARKER_START: &str = "<!-- myc:agents-start";
 const AGENTS_MARKER_END: &str = "<!-- myc:agents-end -->";
 
@@ -46,6 +46,9 @@ myc task list --overdue
 myc task list --blocked
 myc task list --all          # include closed tasks
 myc task list --tree         # parent > child hierarchy
+myc task list --parent 5     # flat list of the direct children of task 5
+myc task list --parent 0     # only top-level tasks (no parent)
+myc task list --parent 5 --tag sp   # children of 5 filtered by tag (combinable)
 
 # Subtasks (parent/child hierarchy — distinct from epics and dependencies).
 # Group a family of tasks under a "hat" task without inventing an epic.

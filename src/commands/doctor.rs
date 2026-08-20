@@ -345,7 +345,7 @@ fn check_circular_dependencies() -> Result<CheckResult> {
 
     match Database::open(&db_path) {
         Ok(db) => {
-            let tasks = db.list_tasks(None, None, None, None, false, false, None)?;
+            let tasks = db.list_tasks(None, None, None, None, false, false, None, None)?;
 
             for task in &tasks {
                 if let Ok(chain) = db.get_all_dependencies(task.id) {

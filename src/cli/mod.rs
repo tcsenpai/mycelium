@@ -469,6 +469,11 @@ pub enum TaskCommands {
         /// match (parent shown as dimmed context, not as an orphan).
         #[arg(long)]
         tree: bool,
+
+        /// Filter to the direct children of this task ID (0 = only top-level
+        /// tasks with no parent). Combine with --tag/--status/etc.
+        #[arg(long, value_parser = id_parser::task_id)]
+        parent: Option<i64>,
     },
 
     /// Batch create tasks from JSON file
@@ -857,6 +862,10 @@ pub struct ListArgs {
     /// Render as a parent>child tree (see `myc task list --tree`)
     #[arg(long)]
     pub tree: bool,
+
+    /// Filter to the direct children of this task ID (0 = only top-level)
+    #[arg(long, value_parser = id_parser::task_id)]
+    pub parent: Option<i64>,
 }
 
 #[derive(Subcommand)]

@@ -68,7 +68,7 @@ fn list_tasks_filters_by_epic() {
     .unwrap();
 
     let in_e1 = db
-        .list_tasks(Some(e1.id), None, None, None, false, false, None)
+        .list_tasks(Some(e1.id), None, None, None, false, false, None, None)
         .unwrap();
     assert_eq!(in_e1.len(), 1);
     assert_eq!(in_e1[0].title, "t1");
@@ -801,6 +801,39 @@ fn mk(db: &mut Database, title: &str) -> i64 {
     )
     .unwrap()
     .id
+}
+
+#[test]
+fn list_tasks_filters_by_parent() {
+    let mut db = db();
+    let p = mk(&mut db, "parent");
+    let c1 = mk(&mut db, "child1");
+    let c2 = mk(&mut db, "child2");
+    let top = mk(&mut db, "top-level sibling");
+    db.set_parent(c1, Some(p)).unwrap();
+    db.set_parent(c2, Some(p)).unwrap();
+
+    // Some(p) -> only the direct children of p.
+    let children = db
+        .list_tasks(None, None, None, None, false, false, None, Some(p))
+        .unwrap();
+    let mut ids: Vec<i64> = children.iter().map(|t| t.id).collect();
+    ids.sort();
+    assert_eq!(ids, vec![c1, c2]);
+
+    // Some(0) -> only top-level tasks (no parent): p and top, NOT the children.
+    let tops = db
+        .list_tasks(None, None, None, None, false, false, None, Some(0))
+        .unwrap();
+    let mut top_ids: Vec<i64> = tops.iter().map(|t| t.id).collect();
+    top_ids.sort();
+    assert_eq!(top_ids, vec![p, top]);
+
+    // None -> no parent filter, everything shows.
+    let all = db
+        .list_tasks(None, None, None, None, false, false, None, None)
+        .unwrap();
+    assert_eq!(all.len(), 4);
 }
 
 #[test]

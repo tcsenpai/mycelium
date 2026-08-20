@@ -8,7 +8,7 @@ pub fn json(output: Option<&str>, quiet: bool) -> Result<()> {
 
     // Collect all data
     let epics = db.list_epics()?;
-    let tasks = db.list_tasks(None, None, None, None, false, false, None)?;
+    let tasks = db.list_tasks(None, None, None, None, false, false, None, None)?;
     let assignees = db.list_assignees()?;
     let summary = db.get_summary()?;
 
@@ -36,7 +36,7 @@ pub fn json(output: Option<&str>, quiet: bool) -> Result<()> {
 
 pub fn csv(output: Option<&str>, quiet: bool) -> Result<()> {
     let db = ensure_initialized()?;
-    let tasks = db.list_tasks(None, None, None, None, false, false, None)?;
+    let tasks = db.list_tasks(None, None, None, None, false, false, None, None)?;
 
     // Use the `csv` crate instead of hand-rolled string formatting: it
     // correctly quotes/escapes embedded commas, quotes, AND newlines (the
