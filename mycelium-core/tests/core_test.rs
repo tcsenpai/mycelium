@@ -804,6 +804,57 @@ fn mk(db: &mut Database, title: &str) -> i64 {
 }
 
 #[test]
+fn search_tasks_matches_title_and_description() {
+    let mut db = db();
+    let t1 = db
+        .create_task(
+            "implement SP subquery",
+            Some("backend work"),
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .id;
+    let t2 = db
+        .create_task(
+            "FE custom_field",
+            Some("missing organization_custom_field_id"),
+            None,
+            Priority::Medium,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .id;
+
+    // Title match.
+    let by_title = db.search_tasks("subquery").unwrap();
+    assert_eq!(by_title.iter().map(|t| t.id).collect::<Vec<_>>(), vec![t1]);
+
+    // Description-only match (word appears only in t2's description).
+    let by_desc = db.search_tasks("organization").unwrap();
+    assert_eq!(by_desc.iter().map(|t| t.id).collect::<Vec<_>>(), vec![t2]);
+
+    // Case-insensitive.
+    assert_eq!(db.search_tasks("SUBQUERY").unwrap().len(), 1);
+
+    // No match.
+    assert!(db.search_tasks("zzznotfound").unwrap().is_empty());
+
+    // Empty query returns nothing (never "match everything").
+    assert!(db.search_tasks("").unwrap().is_empty());
+    assert!(db.search_tasks("   ").unwrap().is_empty());
+}
+
+#[test]
 fn list_tasks_filters_by_parent() {
     let mut db = db();
     let p = mk(&mut db, "parent");

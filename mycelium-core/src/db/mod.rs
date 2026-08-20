@@ -538,6 +538,48 @@ impl Database {
         Ok(result)
     }
 
+    /// Full-text-ish search over task title AND description (case-insensitive
+    /// substring). Returns matches ordered by priority then recency, like
+    /// `list_tasks`. An empty query returns nothing (avoids "match everything").
+    pub fn search_tasks(&self, query: &str) -> Result<Vec<Task>> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(vec![]);
+        }
+        let like = format!("%{}%", q.to_lowercase());
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, description, status, priority, epic_id, assignee_id, due_date, tags, notes, user_info, agent_questions, created_at, updated_at, parent_id
+             FROM tasks
+             WHERE LOWER(title) LIKE ?1 OR LOWER(IFNULL(description, '')) LIKE ?1
+             ORDER BY
+                CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
+                created_at DESC"
+        )?;
+        let rows = stmt.query_map([&like], |row| {
+            let due_date: Option<String> = row.get(7)?;
+            Ok(Task {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                status: parse_status(&row.get::<_, String>(3)?)?,
+                priority: parse_priority(&row.get::<_, String>(4)?)?,
+                epic_id: row.get(5)?,
+                assignee_id: row.get(6)?,
+                due_date: due_date
+                    .and_then(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()),
+                tags: row.get(8)?,
+                notes: row.get(9)?,
+                user_info: row.get(10)?,
+                agent_questions: row.get(11)?,
+                created_at: parse_timestamp(&row.get::<_, String>(12)?)?,
+                updated_at: parse_timestamp(&row.get::<_, String>(13)?)?,
+                parent_id: row.get(14)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
+    }
+
     /// Update a task. Closing a task that still has open blockers is refused
     /// with `BlockedBy` — the dependency guard lives here, not in the callers,
     /// so no update path can bypass it by accident. Use

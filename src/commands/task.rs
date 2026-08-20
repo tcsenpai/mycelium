@@ -1176,6 +1176,45 @@ pub fn ref_unlink(task_id: i64, other_id: i64, ref_type: &str, quiet: bool) -> R
 }
 
 /// Show the non-blocking references (relates/duplicate) touching a task.
+/// Search tasks by title/description substring. Output is id-first and
+/// grep-friendly: quiet mode prints `<id>\t<title>` per line; JSON emits the
+/// full task objects (so an agent can pull ids from a title fragment without
+/// dumping the whole list and filtering by hand).
+pub fn search(query: &str, format: &OutputFormat, quiet: bool) -> Result<()> {
+    let db = ensure_initialized()?;
+    let matches = db.search_tasks(query)?;
+
+    match format {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&matches)?),
+        OutputFormat::Table => {
+            if quiet {
+                for t in &matches {
+                    println!("{}\t{}", tid(t.id), t.title);
+                }
+            } else if matches.is_empty() {
+                println!("{} No tasks match \"{}\".", INFO_PREFIX, query);
+            } else {
+                println!(
+                    "{} {} task(s) matching \"{}\":",
+                    INFO_PREFIX,
+                    matches.len(),
+                    query
+                );
+                for t in &matches {
+                    println!(
+                        "  {} {} {}: {}",
+                        t.status.emoji(),
+                        t.priority.emoji(),
+                        tid(t.id).cyan(),
+                        t.title
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn refs(id: i64, format: &OutputFormat, quiet: bool) -> Result<()> {
     let db = ensure_initialized()?;
     db.get_task(id)?
