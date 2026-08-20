@@ -490,6 +490,12 @@ pub enum TaskCommands {
         id: i64,
     },
 
+    /// Search tasks by title/description (case-insensitive substring)
+    Search {
+        /// Text to search for in task titles and descriptions
+        query: String,
+    },
+
     /// Update a task
     Update {
         /// Task ID

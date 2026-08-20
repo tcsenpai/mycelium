@@ -158,6 +158,9 @@ fn main() {
             ),
             TaskCommands::Batch { file } => commands::task::batch(&file, &cli.format, cli.quiet),
             TaskCommands::Show { id } => commands::task::show(id, &cli.format, cli.quiet),
+            TaskCommands::Search { query } => {
+                commands::task::search(&query, &cli.format, cli.quiet)
+            }
             TaskCommands::Update {
                 id,
                 title,
