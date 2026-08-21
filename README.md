@@ -4,6 +4,10 @@
 
 # Mycelium
 
+<p align="center">
+  <a href="#installation"><b>⚡ Quickstart → Install Mycelium</b></a>
+</p>
+
 **A task manager built for coding agents.** Mycelium gives an AI agent
 (Claude Code, Cursor, Aider, or your own) a durable, git-trackable place to
 plan and remember work across sessions. State lives in a SQLite file inside
